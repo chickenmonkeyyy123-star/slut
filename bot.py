@@ -254,6 +254,4 @@ async def bj(interaction: discord.Interaction, amount: int):
                 if d > 21 or p > d:
                     data["balance"] += amount
                     data["blackjack_wins"] += 1
-                    title, color = "🎉 You Win!", discord.Color.gold()
-                elif p < d:
-                    data["balance"] -= amount
+                    title, color = "🎉 You
