@@ -18,7 +18,7 @@ if not TOKEN:
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
 START_BALANCE = 1000
-GUILD_ID = 1332118870181412936
+GUILD_ID = 1332118870181412936  # YOUR SERVER ID
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
@@ -154,33 +154,30 @@ class BlackjackView(View):
         self.stop()
         await interaction.response.edit_message(embed=embed, view=None)
 
-# ---------- TIP COMMAND ----------
+# ---------- COMMANDS ----------
+@bot.tree.command(name="bj")
+async def bj(interaction: discord.Interaction, amount: int):
+    u = get_user(interaction.user.id)
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message("Invalid bet.", ephemeral=True)
+    game = BlackjackGame(amount)
+    view = BlackjackView(game, interaction.user)
+    await interaction.response.send_message(embed=view.embed(True), view=view)
+
 @bot.tree.command(name="tip")
-@app_commands.describe(
-    amount="Amount of dabloons to tip",
-    user="User you want to tip"
-)
+@app_commands.describe(amount="Amount to tip", user="User to tip")
 async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
     if user.id == interaction.user.id:
-        return await interaction.response.send_message(
-            "❌ You can't tip yourself.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ You can't tip yourself.", ephemeral=True)
 
     sender = get_user(interaction.user.id)
     receiver = get_user(user.id)
 
     if amount <= 0:
-        return await interaction.response.send_message(
-            "❌ Tip amount must be positive.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Amount must be positive.", ephemeral=True)
 
     if sender["balance"] < amount:
-        return await interaction.response.send_message(
-            "❌ You don't have enough dabloons.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Not enough dabloons.", ephemeral=True)
 
     sender["balance"] -= amount
     receiver["balance"] += amount
@@ -190,11 +187,29 @@ async def tip(interaction: discord.Interaction, amount: int, user: discord.User)
         f"💸 {interaction.user.mention} tipped {user.mention} **{amount} dabloons**!"
     )
 
-# ---------- READY ----------
+@bot.tree.command(name="leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    if not data:
+        return await interaction.response.send_message("No data yet.")
+    sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
+    lines = []
+    for i, (uid, u) in enumerate(sorted_users[:10], start=1):
+        w, l = total_wl(u)
+        lines.append(f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏆 {w}W ❌ {l}L")
+    embed = discord.Embed(
+        title="🏆 Leaderboard",
+        description="\n".join(lines),
+        color=discord.Color.gold()
+    )
+    await interaction.response.send_message(embed=embed)
+
+# ---------- READY / FORCE SYNC ----------
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
+    bot.tree.clear_commands(guild=guild)
     await bot.tree.sync(guild=guild)
-    print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
+    print(f"✅ Logged in as {bot.user}")
+    print(f"✅ Commands force-synced to guild {GUILD_ID}")
 
 bot.run(TOKEN)
