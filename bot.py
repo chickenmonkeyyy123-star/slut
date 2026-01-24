@@ -250,9 +250,4 @@ class BlackjackView(View):
     @discord.ui.button(label="Stand", style=discord.ButtonStyle.red, custom_id="blackjack_stand")
     async def stand_button(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            await interaction.response.send_message("This isn't your game!", ephemeral=True)
-            return
-        
-        result = self.game.stand()
-        embed = discord.Embed(
-            title="Blackjack
+            await interaction.response.send_message("This
