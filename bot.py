@@ -268,7 +268,7 @@ async def leaderboard(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
-# ---------- TIP COMMAND (ADDED) ----------
+
 @bot.tree.command(name="tip")
 @app_commands.describe(
     amount="Amount of dabloons to tip",
@@ -425,3 +425,4 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
