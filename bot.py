@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 import random
 import asyncio
 from datetime import datetime, timedelta
-import math
 
 # =====================
 # Load environment
@@ -28,7 +27,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # =====================
 user_data = {}
 giveaways = {}
-mines_games = {}  # Store active mines games
 
 # =====================
 # Helpers
@@ -41,26 +39,8 @@ def get_user_data(user_id):
             "blackjack_losses": 0,
             "coinflip_wins": 0,
             "coinflip_losses": 0,
-            "mines_wins": 0,
-            "mines_losses": 0,
         }
     return user_data[user_id]
-
-def get_mines_multiplier(mines_count):
-    """Calculate multiplier based on number of mines"""
-    multipliers = {
-        1: 1.3,
-        2: 1.5,
-        3: 1.8,
-        4: 2.2,
-        5: 2.8,
-        6: 3.5,
-        7: 4.5,
-        8: 6.0,
-        9: 8.0,
-        10: 12.0
-    }
-    return multipliers.get(mines_count, 1.0)
 
 # =====================
 # Blackjack game
@@ -106,65 +86,6 @@ class BlackjackGame:
         return f"Hidden, {hand[1]}" if hide else ", ".join(hand)
 
 # =====================
-# Mines game
-# =====================
-class MinesGame:
-    def __init__(self, mines_count, bet):
-        self.mines_count = mines_count
-        self.bet = bet
-        self.grid_size = 5
-        self.grid = [[0 for _ in range(self.grid_size)] for _ in range(self.grid_size)]
-        self.revealed = [[False for _ in range(self.grid_size)] for _ in range(self.grid_size)]
-        self.game_over = False
-        self.multiplier = get_mines_multiplier(mines_count)
-        self.revealed_count = 0
-        self.current_multiplier = 1.0
-        
-        # Place mines randomly
-        positions = [(i, j) for i in range(self.grid_size) for j in range(self.grid_size)]
-        random.shuffle(positions)
-        for i in range(mines_count):
-            row, col = positions[i]
-            self.grid[row][col] = 1  # 1 represents a mine
-    
-    def reveal(self, row, col):
-        if self.game_over or self.revealed[row][col]:
-            return False, self.game_over
-        
-        self.revealed[row][col] = True
-        self.revealed_count += 1
-        
-        if self.grid[row][col] == 1:  # Hit a mine
-            self.game_over = True
-            return False, True
-        
-        # Calculate current multiplier based on revealed cells
-        safe_cells = self.grid_size * self.grid_size - self.mines_count
-        self.current_multiplier = 1.0 + (self.multiplier - 1.0) * (self.revealed_count / safe_cells)
-        return True, False
-    
-    def cashout(self):
-        if self.game_over:
-            return 0
-        
-        return self.bet * self.current_multiplier
-    
-    def get_display(self):
-        display = []
-        for i in range(self.grid_size):
-            row = []
-            for j in range(self.grid_size):
-                if self.revealed[i][j]:
-                    if self.grid[i][j] == 1:
-                        row.append("💣")  # Mine
-                    else:
-                        row.append("💎")  # Safe
-                else:
-                    row.append("⬜")  # Unrevealed
-            display.append(" ".join(row))
-        return "\n".join(display)
-
-# =====================
 # Events
 # =====================
 @bot.event
@@ -187,9 +108,6 @@ async def wl(interaction: discord.Interaction, user: discord.Member = None):
     cf_total = data["coinflip_wins"] + data["coinflip_losses"]
     cf_winrate = (data["coinflip_wins"] / cf_total * 100) if cf_total > 0 else 0
     
-    mines_total = data["mines_wins"] + data["mines_losses"]
-    mines_winrate = (data["mines_wins"] / mines_total * 100) if mines_total > 0 else 0
-    
     embed = discord.Embed(
         title=f"📊 {target_user.display_name}'s Statistics",
         color=discord.Color.blue()
@@ -209,44 +127,81 @@ async def wl(interaction: discord.Interaction, user: discord.Member = None):
         inline=True
     )
     
-    embed.add_field(
-        name="💣 Mines",
-        value=f"Wins: {data['mines_wins']}\nLosses: {data['mines_losses']}\nWin Rate: {mines_winrate:.2f}%",
-        inline=True
-    )
-    
     await interaction.response.send_message(embed=embed)
 
 # =====================
-# Mines command
+# Blackjack command
 # =====================
-@bot.tree.command(name="mines", description="Play mines game")
-async def mines(interaction: discord.Interaction, mines_count: int, amount: int):
-    if mines_count < 1 or mines_count > 10:
-        await interaction.response.send_message("Number of mines must be between 1 and 10.", ephemeral=True)
-        return
-    
+@bot.tree.command(name="bj", description="Play blackjack")
+async def bj(interaction: discord.Interaction, amount: int):
     data = get_user_data(interaction.user.id)
-    
     if amount <= 0:
-        await interaction.response.send_message("Bet amount must be positive.", ephemeral=True)
+        await interaction.response.send_message("Bet must be positive.", ephemeral=True)
         return
-    
     if data["balance"] < amount:
-        await interaction.response.send_message("Not enough coins.", ephemeral=True)
+        await interaction.response.send_message("Not enough dabloons.", ephemeral=True)
         return
-    
-    # Create a new game
-    game = MinesGame(mines_count, amount)
-    game_id = f"{interaction.user.id}_{datetime.now().timestamp()}"
-    mines_games[game_id] = game
-    
-    # Create the game view
-    view = discord.ui.View(timeout=300)
-    
-    # Add cashout button
-    cashout_button = discord.ui.Button(label="Cashout", style=discord.ButtonStyle.success, row=5)
-    
-    async def cashout_callback(interaction):
-        if game.game_over:
-            await interaction.response.send_message("Game is already over
+    game = BlackjackGame(amount)
+    embed = discord.Embed(
+        title="♠️ Blackjack ♠️",
+        description=(
+            f"Your hand: {game.fmt(game.player)} ({game.value(game.player)})\n"
+            f"Dealer: {game.fmt(game.dealer, True)}"
+        ),
+        color=discord.Color.green()
+    )
+    view = discord.ui.View(timeout=60)
+    hit = discord.ui.Button(label="Hit", style=discord.ButtonStyle.success)
+    stand = discord.ui.Button(label="Stand", style=discord.ButtonStyle.danger)
+    async def hit_cb(inter):
+        if game.hit():
+            data["balance"] -= amount
+            data["blackjack_losses"] += 1
+            await inter.response.edit_message(
+                embed=discord.Embed(
+                    title="💥 Busted!",
+                    description=f"Your hand: {game.fmt(game.player)} ({game.value(game.player)})",
+                    color=discord.Color.red()
+                ),
+                view=None
+            )
+        else:
+            embed.description = (
+                f"Your hand: {game.fmt(game.player)} ({game.value(game.player)})\n"
+                f"Dealer: {game.fmt(game.dealer, True)}"
+            )
+            await inter.response.edit_message(embed=embed)
+    async def stand_cb(inter):
+        game.stand()
+        p, d = game.value(game.player), game.value(game.dealer)
+        if d > 21 or p > d:
+            data["balance"] += amount
+            data["blackjack_wins"] += 1
+            title, color = "🎉 You Win!", discord.Color.gold()
+        elif p < d:
+            data["balance"] -= amount
+            data["blackjack_losses"] += 1
+            title, color = "😢 You Lose", discord.Color.red()
+        else:
+            title, color = "🤝 Tie", discord.Color.blurple()
+        await inter.response.edit_message(
+            embed=discord.Embed(
+                title=title,
+                description=(
+                    f"Your hand: {game.fmt(game.player)} ({p})\n"
+                    f"Dealer: {game.fmt(game.dealer)} ({d})"
+                ),
+                color=color
+            ),
+            view=None
+        )
+    hit.callback = hit_cb
+    stand.callback = stand_cb
+    view.add_item(hit)
+    view.add_item(stand)
+    await interaction.response.send_message(embed=embed, view=view)
+
+# =====================
+# Run bot
+# =====================
+bot.run(TOKEN)
