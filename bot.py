@@ -213,14 +213,4 @@ async def leaderboard(ctx, user: discord.User = None):
             cf_ratio = cf_wins / (cf_wins + cf_losses) if (cf_wins + cf_losses) > 0 else 0
             bj_ratio = bj_wins / (bj_wins + bj_losses) if (bj_wins + bj_losses) > 0 else 0
             
-            embed.description += f"**#{i}** {username}: {dabloons} dabloons\n"
-            embed.description += f"  Coinflip: {cf_ratio:.2%} | Blackjack: {bj_ratio:.2%}\n\n"
-        
-        await ctx.send(embed=embed)
-
-@bot.command(name='history')
-@commands.check(is_allowed_channel)
-async def history(ctx, limit: int = 10):
-    cursor.execute("""
-    SELECT game, amount, result, timestamp 
-   
+            embed.description += f"**#{i}** {username}: {dabloons} dabloons
