@@ -10,6 +10,7 @@ from discord.ui import Button, View
 # Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # Data storage
@@ -220,13 +221,18 @@ class CoinflipView(View):
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} servers')
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(e)
 
-# Bot commands
-@bot.command(name="giveaway")
-async def giveaway(ctx, amount: int, duration: int, winners: int):
+# Bot commands (slash commands)
+@bot.tree.command(name="giveaway", description="Start a giveaway for dabloons")
+async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
     """Start a giveaway for dabloons"""
     if amount <= 0 or duration <= 0 or winners <= 0:
-        await ctx.send("Amount, duration, and winners must be positive numbers!")
+        await interaction.response.send_message("Amount, duration, and winners must be positive numbers!")
         return
     
     # Create giveaway view
@@ -238,10 +244,11 @@ async def giveaway(ctx, amount: int, duration: int, winners: int):
         description=f"Prize: {amount} dabloons\nWinners: {winners}\nDuration: {duration} minutes",
         color=discord.Color.gold()
     )
-    embed.set_footer(text=f"Hosted by {ctx.author.display_name}")
+    embed.set_footer(text=f"Hosted by {interaction.user.display_name}")
     
     # Send giveaway message
-    message = await ctx.send(embed=embed, view=view)
+    await interaction.response.send_message(embed=embed, view=view)
+    message = await interaction.original_response()
     view.message = message
     
     # Wait for duration
@@ -249,18 +256,10 @@ async def giveaway(ctx, amount: int, duration: int, winners: int):
     
     # Select winners
     if len(view.participants) < winners:
-        await ctx.send("Not enough participants for the giveaway!")
+        await message.reply("Not enough participants for the giveaway!")
         return
     
     selected_winners = random.sample(view.participants, min(winners, len(view.participants)))
     
     # Announce winners
-    winners_text = ", ".join([f"<@!{winner_id}>" for winner_id in selected_winners])
-    embed = discord.Embed(
-        title="🎉 Giveaway Ended 🎉",
-        description=f"Winners: {winners_text}\nEach won {amount} dabloons!",
-        color=discord.Color.blue()
-    )
-    await message.edit(embed=embed, view=None)
-    
-    # Award dabloons
+    winners_text = ", ".join([
