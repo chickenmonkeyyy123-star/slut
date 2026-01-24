@@ -268,6 +268,42 @@ async def leaderboard(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
+# ---------- TIP COMMAND (ADDED) ----------
+@bot.tree.command(name="tip")
+@app_commands.describe(
+    amount="Amount of dabloons to tip",
+    user="User to tip dabloons to"
+)
+async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
+    if user.id == interaction.user.id:
+        return await interaction.response.send_message(
+            "❌ You can't tip yourself.",
+            ephemeral=True
+        )
+
+    sender = get_user(interaction.user.id)
+    receiver = get_user(user.id)
+
+    if amount <= 0:
+        return await interaction.response.send_message(
+            "❌ Tip amount must be positive.",
+            ephemeral=True
+        )
+
+    if sender["balance"] < amount:
+        return await interaction.response.send_message(
+            "❌ You don't have enough dabloons.",
+            ephemeral=True
+        )
+
+    sender["balance"] -= amount
+    receiver["balance"] += amount
+    save_data()
+
+    await interaction.response.send_message(
+        f"💸 {interaction.user.mention} tipped {user.mention} **{amount} dabloons**!"
+    )
+
 # ---------- GIVEAWAY ----------
 class GiveawayView(View):
     def __init__(self):
@@ -385,7 +421,7 @@ async def sync(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)  # ensure commands appear immediately
+    await bot.tree.sync(guild=guild)
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
