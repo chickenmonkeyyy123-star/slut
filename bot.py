@@ -16,9 +16,11 @@ GUILD_ID = 1332118870181412936
 START_BALANCE = 1000
 
 # ======================
-# BOT SETUP
+# INTENTS (IMPORTANT)
 # ======================
-intents = discord.Intents.none()
+intents = discord.Intents.default()
+intents.guilds = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
@@ -26,7 +28,7 @@ tree = bot.tree
 # DATA (in-memory)
 # ======================
 balances = {}
-stats = {}  # user_id -> stats dict
+stats = {}
 
 
 def ensure_user(user: discord.User):
@@ -231,30 +233,20 @@ async def cf(
 
 
 @tree.command(name="giveaway", description="Start a dabloon giveaway")
-async def giveaway(
-    interaction: discord.Interaction,
-    amount: int,
-    duration: int,
-    winners: int
-):
+async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
     winners = max(1, min(4, winners))
     view = GiveawayView(amount, winners, duration)
 
     await interaction.response.send_message(
         f"🎉 **Giveaway Started** 🎉\n"
-        f"Amount: {amount}\n"
-        f"Winners: {winners}\n"
-        f"Duration: {duration}s",
+        f"Amount: {amount}\nWinners: {winners}\nDuration: {duration}s",
         view=view
     )
     view.message = await interaction.original_response()
 
 
 @tree.command(name="wl", description="View win/loss stats and balance")
-async def wl(
-    interaction: discord.Interaction,
-    user: Optional[discord.Member] = None
-):
+async def wl(interaction: discord.Interaction, user: Optional[discord.Member] = None):
     target = user or interaction.user
     ensure_user(target)
     s = stats[target.id]
@@ -275,17 +267,13 @@ async def leaderboard(interaction: discord.Interaction):
         )
         return
 
-    sorted_users = sorted(
-        balances.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )[:10]
+    top = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:10]
 
     medals = ["🥇", "🥈", "🥉"]
     lines = []
 
-    for i, (user_id, bal) in enumerate(sorted_users):
-        member = interaction.guild.get_member(user_id)
+    for i, (uid, bal) in enumerate(top):
+        member = interaction.guild.get_member(uid)
         if not member:
             continue
         prefix = medals[i] if i < 3 else f"`#{i+1}`"
@@ -297,20 +285,20 @@ async def leaderboard(interaction: discord.Interaction):
 
 
 # ======================
-# READY EVENT (GUILD SYNC)
+# COMMAND REGISTRATION
 # ======================
 @bot.event
-async def on_ready():
+async def setup_hook():
     guild = discord.Object(id=GUILD_ID)
-
-    tree.clear_commands(guild=None)
-    tree.copy_global_to(guild=guild)
     await tree.sync(guild=guild)
 
+
+@bot.event
+async def on_ready():
     print(f"Logged in as {bot.user}")
 
 
 # ======================
-# START
+# START BOT
 # ======================
 bot.run(TOKEN)
