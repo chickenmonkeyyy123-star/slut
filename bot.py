@@ -268,61 +268,6 @@ async def leaderboard(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
-    @bot.tree.command(name="leaderboard")
-async def leaderboard(interaction: discord.Interaction):
-    if not data:
-        return await interaction.response.send_message("No data yet.")
-    sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
-    lines = []
-    for i, (uid, u) in enumerate(sorted_users[:10], start=1):
-        w, l = total_wl(u)
-        lines.append(f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏆 {w}W ❌ {l}L")
-    embed = discord.Embed(
-        title="🏆 Leaderboard",
-        description="\n".join(lines),
-        color=discord.Color.gold()
-    )
-    await interaction.response.send_message(embed=embed)
-
-
-# 🔽🔽🔽 PASTE BELOW THIS LINE 🔽🔽🔽
-
-@bot.tree.command(name="tip")
-@app_commands.describe(
-    amount="Amount of dabloons to tip",
-    user="User to tip dabloons to"
-)
-async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
-    if user.id == interaction.user.id:
-        return await interaction.response.send_message(
-            "❌ You can't tip yourself.",
-            ephemeral=True
-        )
-
-    sender = get_user(interaction.user.id)
-    receiver = get_user(user.id)
-
-    if amount <= 0:
-        return await interaction.response.send_message(
-            "❌ Tip amount must be positive.",
-            ephemeral=True
-        )
-
-    if sender["balance"] < amount:
-        return await interaction.response.send_message(
-            "❌ You don't have enough dabloons.",
-            ephemeral=True
-        )
-
-    sender["balance"] -= amount
-    receiver["balance"] += amount
-    save_data()
-
-    await interaction.response.send_message(
-        f"💸 {interaction.user.mention} tipped {user.mention} **{amount} dabloons**!"
-    )
-
-
 # ---------- GIVEAWAY ----------
 class GiveawayView(View):
     def __init__(self):
