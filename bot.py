@@ -9,10 +9,9 @@ from dotenv import load_dotenv
 
 # ---------- LOAD .ENV ----------
 load_dotenv()
-
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    raise RuntimeError("DISCORD_TOKEN not found. Check your .env file.")
+    raise RuntimeError("DISCORD_TOKEN not found in .env")
 
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
@@ -46,10 +45,10 @@ def get_user(uid):
         save_data()
     return data[uid]
 
-def total_wl(user):
+def total_wl(u):
     return (
-        user["blackjack"]["wins"] + user["coinflip"]["wins"],
-        user["blackjack"]["losses"] + user["coinflip"]["losses"],
+        u["blackjack"]["wins"] + u["coinflip"]["wins"],
+        u["blackjack"]["losses"] + u["coinflip"]["losses"],
     )
 
 # ---------- BLACKJACK ----------
@@ -137,7 +136,6 @@ class BlackjackView(View):
         self.game.stand()
         pv = self.game.value(self.game.player)
         dv = self.game.value(self.game.dealer)
-
         embed = self.embed(False)
         u = get_user(self.user.id)
 
@@ -158,34 +156,48 @@ class BlackjackView(View):
         self.stop()
         await interaction.response.edit_message(embed=embed, view=None)
 
-# ---------- COINFLIP ----------
+# ---------- COINFLIP VIEW ----------
 class CoinflipView(View):
-    def __init__(self, user, bet, choice):
-        super().__init__(timeout=30)
-        self.user = user
+    def __init__(self, initiator, opponent, bet, choice):
+        super().__init__(timeout=60)
+        self.initiator = initiator
+        self.opponent = opponent
         self.bet = bet
         self.choice = choice
 
-    @discord.ui.button(label="Flip", style=discord.ButtonStyle.green)
-    async def flip(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("Not yours.", ephemeral=True)
+    @discord.ui.button(label="Accept Coinflip", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.opponent.id:
+            return await interaction.response.send_message("This isn't for you.", ephemeral=True)
+
+        u1 = get_user(self.initiator.id)
+        u2 = get_user(self.opponent.id)
+
+        if u2["balance"] < self.bet:
+            return await interaction.response.send_message("You don't have enough balance.", ephemeral=True)
 
         result = random.choice(["heads", "tails"])
-        u = get_user(self.user.id)
+        self.stop()
 
         if result == self.choice:
-            u["balance"] += self.bet
-            u["coinflip"]["wins"] += 1
-            msg = f"🪙 **{result.upper()}** — You win {self.bet}!"
+            u1["balance"] += self.bet
+            u2["balance"] -= self.bet
+            u1["coinflip"]["wins"] += 1
+            u2["coinflip"]["losses"] += 1
+            winner = self.initiator
         else:
-            u["balance"] -= self.bet
-            u["coinflip"]["losses"] += 1
-            msg = f"🪙 **{result.upper()}** — You lost {self.bet}."
+            u2["balance"] += self.bet
+            u1["balance"] -= self.bet
+            u2["coinflip"]["wins"] += 1
+            u1["coinflip"]["losses"] += 1
+            winner = self.opponent
 
         save_data()
-        self.stop()
-        await interaction.response.edit_message(content=msg, view=None)
+
+        await interaction.response.edit_message(
+            content=f"🪙 **{result.upper()}**\n🏆 {winner.mention} won **{self.bet} dabloons**",
+            view=None
+        )
 
 # ---------- COMMANDS ----------
 @bot.tree.command(name="bj")
@@ -199,7 +211,17 @@ async def bj(interaction: discord.Interaction, amount: int):
     await interaction.response.send_message(embed=view.embed(True), view=view)
 
 @bot.tree.command(name="cf")
-async def cf(interaction: discord.Interaction, amount: int, choice: str):
+@app_commands.describe(
+    amount="Bet amount",
+    choice="heads or tails",
+    user="User to coinflip against (optional)"
+)
+async def cf(
+    interaction: discord.Interaction,
+    amount: int,
+    choice: str,
+    user: discord.User | None = None
+):
     choice = choice.lower()
     u = get_user(interaction.user.id)
 
@@ -207,10 +229,38 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str):
         return await interaction.response.send_message("heads or tails only.", ephemeral=True)
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
+    if user and user.id == interaction.user.id:
+        return await interaction.response.send_message("You can't coinflip yourself.", ephemeral=True)
 
-    view = CoinflipView(interaction.user, amount, choice)
+    # ---- AI COINFLIP ----
+    if not user:
+        result = random.choice(["heads", "tails"])
+        if result == choice:
+            u["balance"] += amount
+            u["coinflip"]["wins"] += 1
+            msg = f"🪙 **{result.upper()}** — You won **{amount}**!"
+        else:
+            u["balance"] -= amount
+            u["coinflip"]["losses"] += 1
+            msg = f"🪙 **{result.upper()}** — You lost **{amount}**."
+
+        save_data()
+        return await interaction.response.send_message(msg)
+
+    # ---- PvP COINFLIP ----
+    opponent = get_user(user.id)
+    if opponent["balance"] < amount:
+        return await interaction.response.send_message(
+            f"{user.mention} doesn't have enough balance.",
+            ephemeral=True
+        )
+
+    view = CoinflipView(interaction.user, user, amount, choice)
     await interaction.response.send_message(
-        f"🪙 Coinflip for **{amount}** — You chose **{choice}**",
+        f"🪙 **Coinflip Challenge**\n"
+        f"{interaction.user.mention} vs {user.mention}\n"
+        f"Bet: **{amount} dabloons**\n"
+        f"{user.mention}, click **Accept Coinflip**",
         view=view
     )
 
