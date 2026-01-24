@@ -253,5 +253,4 @@ async def mines(interaction: discord.Interaction, mines_count: int, amount: int)
                 row=i
             )
             
-            async def button_callback(interaction, row=i, col=j):
-                if game
+            async
