@@ -5,9 +5,16 @@ from discord.ui import View, Button
 import random
 import json
 import os
+from dotenv import load_dotenv
+
+# ---------- LOAD .ENV ----------
+load_dotenv()
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN not found. Check your .env file.")
 
 # ---------- CONFIG ----------
-TOKEN = os.getenv("DISCORD_TOKEN")
 DATA_FILE = "dabloon_data.json"
 START_BALANCE = 1000
 
@@ -40,9 +47,10 @@ def get_user(uid):
     return data[uid]
 
 def total_wl(user):
-    wins = user["blackjack"]["wins"] + user["coinflip"]["wins"]
-    losses = user["blackjack"]["losses"] + user["coinflip"]["losses"]
-    return wins, losses
+    return (
+        user["blackjack"]["wins"] + user["coinflip"]["wins"],
+        user["blackjack"]["losses"] + user["coinflip"]["losses"],
+    )
 
 # ---------- BLACKJACK ----------
 class BlackjackGame:
@@ -211,18 +219,12 @@ async def leaderboard(interaction: discord.Interaction):
     if not data:
         return await interaction.response.send_message("No data yet.")
 
-    sorted_users = sorted(
-        data.items(),
-        key=lambda x: x[1]["balance"],
-        reverse=True
-    )
+    sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
 
     lines = []
     for i, (uid, u) in enumerate(sorted_users[:10], start=1):
-        wins, losses = total_wl(u)
-        lines.append(
-            f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏆 {wins}W ❌ {losses}L"
-        )
+        w, l = total_wl(u)
+        lines.append(f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏆 {w}W ❌ {l}L")
 
     embed = discord.Embed(
         title="🏆 Leaderboard",
