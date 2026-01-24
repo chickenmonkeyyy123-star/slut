@@ -248,4 +248,10 @@ async def bj(interaction: discord.Interaction, amount: int):
                 title=title,
                 description=(
                     f"Your hand: {game.fmt(game.player)} ({p})\n"
-                    f"Dealer: {game.fmt(game.dealer
+                    f"Dealer: {game.fmt(game.dealer)} ({d})"
+                ),
+                color=color
+            ),
+            view=None
+        )
+    hit.callback = hit_cb
