@@ -216,50 +216,43 @@ class CoinflipView(View):
                     f"The AI won {self.amount} dabloons!"
                 )
 
-# Bot events
-@bot.event
-async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
-    print(f'Bot is in {len(bot.guilds)} servers')
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(e)
-
-# Bot commands (slash commands)
-@bot.tree.command(name="giveaway", description="Start a giveaway for dabloons")
-async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
-    """Start a giveaway for dabloons"""
-    if amount <= 0 or duration <= 0 or winners <= 0:
-        await interaction.response.send_message("Amount, duration, and winners must be positive numbers!")
-        return
+# Blackjack view
+class BlackjackView(View):
+    def __init__(self, game, user):
+        super().__init__(timeout=60)
+        self.game = game
+        self.user = user
     
-    # Create giveaway view
-    view = GiveawayView(amount, duration, winners)
+    @discord.ui.button(label="Hit", style=discord.ButtonStyle.green, custom_id="blackjack_hit")
+    async def hit_button(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("This isn't your game!", ephemeral=True)
+            return
+        
+        result = self.game.hit()
+        embed = discord.Embed(
+            title="Blackjack",
+            description=f"Your hand: {self.game.format_hand(self.game.player_hand)} (Value: {self.game.hand_value(self.game.player_hand)})\n"
+                       f"Dealer's hand: {self.game.format_hand(self.game.dealer_hand, hide_first=True)}",
+            color=discord.Color.blue()
+        )
+        
+        if result == "bust":
+            embed.description += "\n\n**Bust! You lose!**"
+            embed.color = discord.Color.red()
+            update_balance(self.user.id, -self.game.bet)
+            update_stats(self.user.id, "blackjack", "losses")
+            self.stop()
+            await interaction.response.edit_message(embed=embed, view=None)
+        else:
+            await interaction.response.edit_message(embed=embed)
     
-    # Create giveaway embed
-    embed = discord.Embed(
-        title="🎉 Dabloon Giveaway 🎉",
-        description=f"Prize: {amount} dabloons\nWinners: {winners}\nDuration: {duration} minutes",
-        color=discord.Color.gold()
-    )
-    embed.set_footer(text=f"Hosted by {interaction.user.display_name}")
-    
-    # Send giveaway message
-    await interaction.response.send_message(embed=embed, view=view)
-    message = await interaction.original_response()
-    view.message = message
-    
-    # Wait for duration
-    await asyncio.sleep(duration * 60)
-    
-    # Select winners
-    if len(view.participants) < winners:
-        await message.reply("Not enough participants for the giveaway!")
-        return
-    
-    selected_winners = random.sample(view.participants, min(winners, len(view.participants)))
-    
-    # Announce winners
-    winners_text = ", ".join([
+    @discord.ui.button(label="Stand", style=discord.ButtonStyle.red, custom_id="blackjack_stand")
+    async def stand_button(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("This isn't your game!", ephemeral=True)
+            return
+        
+        result = self.game.stand()
+        embed = discord.Embed(
+            title="Blackjack
