@@ -244,13 +244,9 @@ async def mines(interaction: discord.Interaction, mines_count: int, amount: int)
     # Create the game view
     view = discord.ui.View(timeout=300)
     
-    # Add buttons for the grid
-    for i in range(5):
-        for j in range(5):
-            button = discord.ui.Button(
-                label=f"{i*5 + j + 1}",
-                style=discord.ButtonStyle.secondary,
-                row=i
-            )
-            
-            async
+    # Add cashout button
+    cashout_button = discord.ui.Button(label="Cashout", style=discord.ButtonStyle.success, row=5)
+    
+    async def cashout_callback(interaction):
+        if game.game_over:
+            await interaction.response.send_message("Game is already over
