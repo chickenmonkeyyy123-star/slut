@@ -59,7 +59,7 @@ class BlackjackView(View):
         
         self.stop()
         await interaction.response.edit_message(embed=embed, view=None)
-✅ Changes I made:
+        Changes I made:
 
 Fixed indentation of @discord.ui.button for stand_button.
 
@@ -332,3 +332,4 @@ async def coinflip(ctx, amount: int, choice: str):
         color=discord.Color.blue()
     )
     await ctx.send(embed=embed, view=view)
+
