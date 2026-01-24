@@ -1,0 +1,181 @@
+import os
+import discord
+from discord.ext import commands
+from discord import app_commands
+from dotenv import load_dotenv
+import random
+import asyncio
+from datetime import datetime, timedelta
+
+# =====================
+# Load environment
+# =====================
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN not found in .env")
+
+# =====================
+# Bot setup
+# =====================
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# =====================
+# Data storage (memory)
+# =====================
+user_data = {}
+giveaways = {}
+
+# =====================
+# Helpers
+# =====================
+def get_user_data(user_id):
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "balance": 1000,
+            "blackjack_wins": 0,
+            "blackjack_losses": 0,
+        }
+    return user_data[user_id]
+
+# =====================
+# Blackjack game
+# =====================
+class BlackjackGame:
+    def __init__(self, bet):
+        self.deck = self.create_deck()
+        random.shuffle(self.deck)
+        self.player = [self.deck.pop(), self.deck.pop()]
+        self.dealer = [self.deck.pop(), self.deck.pop()]
+        self.bet = bet
+
+    def create_deck(self):
+        suits = ["♠", "♥", "♦", "♣"]
+        ranks = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"]
+        return [f"{r}{s}" for s in suits for r in ranks]
+
+    def value(self, hand):
+        total, aces = 0, 0
+        for card in hand:
+            r = card[:-1]
+            if r in "JQK":
+                total += 10
+            elif r == "A":
+                total += 11
+                aces += 1
+            else:
+                total += int(r)
+        while total > 21 and aces:
+            total -= 10
+            aces -= 1
+        return total
+
+    def hit(self):
+        self.player.append(self.deck.pop())
+        return self.value(self.player) > 21
+
+    def stand(self):
+        while self.value(self.dealer) < 17:
+            self.dealer.append(self.deck.pop())
+
+    def fmt(self, hand, hide=False):
+        return f"Hidden, {hand[1]}" if hide else ", ".join(hand)
+
+# =====================
+# Events
+# =====================
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"✅ Logged in as {bot.user}")
+
+# =====================
+# Blackjack command
+# =====================
+@bot.tree.command(name="bj", description="Play blackjack")
+async def bj(interaction: discord.Interaction, amount: int):
+    data = get_user_data(interaction.user.id)
+
+    if amount <= 0:
+        await interaction.response.send_message("Bet must be positive.", ephemeral=True)
+        return
+    if data["balance"] < amount:
+        await interaction.response.send_message("Not enough dabloons.", ephemeral=True)
+        return
+
+    game = BlackjackGame(amount)
+
+    embed = discord.Embed(
+        title="♠️ Blackjack ♠️",
+        description=(
+            f"Your hand: {game.fmt(game.player)} ({game.value(game.player)})\n"
+            f"Dealer: {game.fmt(game.dealer, True)}"
+        ),
+        color=discord.Color.green()
+    )
+
+    view = discord.ui.View(timeout=60)
+
+    hit = discord.ui.Button(label="Hit", style=discord.ButtonStyle.success)
+    stand = discord.ui.Button(label="Stand", style=discord.ButtonStyle.danger)
+
+    async def hit_cb(inter):
+        if game.hit():
+            data["balance"] -= amount
+            data["blackjack_losses"] += 1
+            await inter.response.edit_message(
+                embed=discord.Embed(
+                    title="💥 Busted!",
+                    description=f"Your hand: {game.fmt(game.player)} ({game.value(game.player)})",
+                    color=discord.Color.red()
+                ),
+                view=None
+            )
+        else:
+            embed.description = (
+                f"Your hand: {game.fmt(game.player)} ({game.value(game.player)})\n"
+                f"Dealer: {game.fmt(game.dealer, True)}"
+            )
+            await inter.response.edit_message(embed=embed)
+
+    async def stand_cb(inter):
+        game.stand()
+        p, d = game.value(game.player), game.value(game.dealer)
+
+        if d > 21 or p > d:
+            data["balance"] += amount
+            data["blackjack_wins"] += 1
+            title, color = "🎉 You Win!", discord.Color.gold()
+        elif p < d:
+            data["balance"] -= amount
+            data["blackjack_losses"] += 1
+            title, color = "😢 You Lose", discord.Color.red()
+        else:
+            title, color = "🤝 Tie", discord.Color.blurple()
+
+        await inter.response.edit_message(
+            embed=discord.Embed(
+                title=title,
+                description=(
+                    f"Your hand: {game.fmt(game.player)} ({p})\n"
+                    f"Dealer: {game.fmt(game.dealer)} ({d})"
+                ),
+                color=color
+            ),
+            view=None
+        )
+
+    hit.callback = hit_cb
+    stand.callback = stand_cb
+    view.add_item(hit)
+    view.add_item(stand)
+
+    await interaction.response.send_message(embed=embed, view=view)
+
+# =====================
+# Run bot
+# =====================
+bot.run(TOKEN)
