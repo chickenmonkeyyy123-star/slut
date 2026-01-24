@@ -245,7 +245,4 @@ class BlackjackView(View):
             self.stop()
             await interaction.response.edit_message(embed=embed, view=None)
         else:
-            await interaction.response.edit_message(embed=embed)
-    
-    @discord.ui.button(label="Stand", style=discord.ButtonStyle.red, custom_id="blackjack_stand")
-    async def stand_button(self, interaction: discord.Interaction,
+            await interaction.response.edit_message(embed
