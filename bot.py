@@ -1,228 +1,226 @@
-import os
-import random
-from typing import Optional
-
 import discord
 from discord.ext import commands
-from discord import app_commands
+import random
+import sqlite3
+import os
 from dotenv import load_dotenv
 
-# -----------------------
-# CONFIG
-# -----------------------
+# Load environment variables
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = 1332118870181412936  # your server
-START_BALANCE = 1000
 
-# -----------------------
-# INTENTS
-# -----------------------
-intents = discord.Intents.default()
-intents.guilds = True  # REQUIRED for slash commands
-bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
+# Get variables from .env file
+TOKEN = os.getenv('DISCORD_TOKEN')
 
-# -----------------------
-# DATA STORAGE
-# -----------------------
-balances = {}
-stats = {}
+# Hardcoded channel and category IDs
+ALLOWED_CATEGORY_ID = 1332118870181412938  # Text Channels Category
+GAMBLING_CHANNEL_ID = 1464725219892793476  # Gambling Channel
+LOG_CHANNEL_ID = 1464725054326702080  # Log Channel WL
 
-def ensure_user(user: discord.User):
-    if user.id not in balances:
-        balances[user.id] = START_BALANCE
-    if user.id not in stats:
-        stats[user.id] = {"bj_w": 0, "bj_l": 0, "cf_w": 0, "cf_l": 0}
+# Initialize bot
+bot = commands.Bot(command_prefix='/', intents=discord.Intents.default())
 
-def can_afford(user, amount):
-    ensure_user(user)
-    return balances[user.id] >= amount
+# Database setup
+conn = sqlite3.connect('slut_bot.db')
+cursor = conn.cursor()
 
-# -----------------------
-# BLACKJACK HELPERS
-# -----------------------
-def draw_card():
-    return random.choice([2,3,4,5,6,7,8,9,10,10,10,11])
+# Create tables if they don't exist
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    dabloons INTEGER DEFAULT 1000,
+    coinflip_wins INTEGER DEFAULT 0,
+    coinflip_losses INTEGER DEFAULT 0,
+    blackjack_wins INTEGER DEFAULT 0,
+    blackjack_losses INTEGER DEFAULT 0
+)
+""")
+conn.commit()
 
-def hand_value(hand):
-    total = sum(hand)
-    aces = hand.count(11)
-    while total > 21 and aces:
-        total -= 10
-        aces -= 1
-    return total
+# Create transactions table for logging
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    game TEXT,
+    amount INTEGER,
+    result TEXT,  -- 'win' or 'loss'
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+conn.commit()
 
-# -----------------------
-# GIVEAWAY VIEW
-# -----------------------
-class GiveawayView(discord.ui.View):
-    def __init__(self, amount, winners, duration):
-        super().__init__(timeout=duration)
-        self.amount = amount
-        self.winners = winners
-        self.entries = set()
+# Helper functions
+def get_user_balance(user_id):
+    cursor.execute("SELECT dabloons FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else 1000
 
-    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
-    async def enter(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ensure_user(interaction.user)
-        self.entries.add(interaction.user.id)
-        await interaction.response.send_message("You entered the giveaway!", ephemeral=True)
+def update_balance(user_id, amount):
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    cursor.execute("UPDATE users SET dabloons=dabloons+? WHERE user_id=?", (amount, user_id))
+    conn.commit()
 
-    async def on_timeout(self):
-        if not self.entries:
-            return
-        winners = random.sample(list(self.entries), min(self.winners, len(self.entries)))
-        msg = "🎊 **Giveaway Results** 🎊\n"
-        for uid in winners:
-            balances[uid] += self.amount
-            member = self.message.guild.get_member(uid)
-            msg += f"- {member.mention} won **{self.amount} dabloons**\n"
-        await self.message.channel.send(msg)
-
-# -----------------------
-# COINFLIP VIEW
-# -----------------------
-class CoinflipView(discord.ui.View):
-    def __init__(self, challenger, target, amount, choice):
-        super().__init__(timeout=120)
-        self.challenger = challenger
-        self.target = target
-        self.amount = amount
-        self.choice = choice
-        self.resolved = False
-
-    @discord.ui.button(label="Accept Coinflip", style=discord.ButtonStyle.blurple)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.target and interaction.user.id != self.target.id:
-            await interaction.response.send_message("This coinflip isn’t for you.", ephemeral=True)
-            return
-        await self.resolve(interaction.user, interaction.channel)
-        await interaction.response.defer()
-
-    async def resolve(self, opponent, channel):
-        if self.resolved: return
-        self.resolved = True
-
-        flip = random.choice(["heads","tails"])
-        winner = self.challenger if flip == self.choice else opponent
-        loser = opponent if winner == self.challenger else self.challenger
-
-        balances[winner.id] += self.amount
-        balances[loser.id] -= self.amount
-        stats[winner.id]["cf_w"] += 1
-        stats[loser.id]["cf_l"] += 1
-
-        await channel.send(f"🪙 Coin landed **{flip.upper()}**!\n🏆 {winner.mention} won **{self.amount} dabloons**")
-
-    async def on_timeout(self):
-        if self.target or self.resolved:
-            return
-        flip = random.choice(["heads","tails"])
-        if flip == self.choice:
-            balances[self.challenger.id] += self.amount
-            stats[self.challenger.id]["cf_w"] += 1
-            result = "won"
-        else:
-            balances[self.challenger.id] -= self.amount
-            stats[self.challenger.id]["cf_l"] += 1
-            result = "lost"
-        await self.message.channel.send(f"🪙 AI coinflip landed **{flip.upper()}** — You {result} **{self.amount} dabloons**")
-
-# -----------------------
-# SLASH COMMANDS
-# -----------------------
-@tree.command(name="bj", description="Play blackjack vs AI")
-async def bj(interaction: discord.Interaction, amount: int):
-    ensure_user(interaction.user)
-    if not can_afford(interaction.user, amount):
-        await interaction.response.send_message("Not enough dabloons.", ephemeral=True)
-        return
-
-    player = [draw_card(), draw_card()]
-    dealer = [draw_card(), draw_card()]
-
-    while hand_value(player) < 17:
-        player.append(draw_card())
-    while hand_value(dealer) < 17:
-        dealer.append(draw_card())
-
-    p, d = hand_value(player), hand_value(dealer)
-
-    if p > 21 or (d <= 21 and d > p):
-        balances[interaction.user.id] -= amount
-        stats[interaction.user.id]["bj_l"] += 1
-        result = "You lost"
+def update_game_stats(user_id, game, won):
+    wins_col = f"{game}_wins"
+    losses_col = f"{game}_losses"
+    if won:
+        cursor.execute(f"UPDATE users SET {wins_col}={wins_col}+1 WHERE user_id=?", (user_id,))
     else:
-        balances[interaction.user.id] += amount
-        stats[interaction.user.id]["bj_w"] += 1
-        result = "You won"
+        cursor.execute(f"UPDATE users SET {losses_col}={losses_col}+1 WHERE user_id=?", (user_id,))
+    conn.commit()
 
-    await interaction.response.send_message(f"🃏 **Blackjack**\nYour hand: {player} ({p})\nDealer: {dealer} ({d})\n**{result} {amount} dabloons**")
+def log_transaction(user_id, game, amount, result):
+    cursor.execute("""
+    INSERT INTO transactions (user_id, game, amount, result)
+    VALUES (?, ?, ?, ?)
+    """, (user_id, game, amount, result))
+    conn.commit()
 
-@tree.command(name="cf", description="Coinflip vs user or AI")
-async def cf(interaction: discord.Interaction, amount: int, choice: str, user: Optional[discord.Member] = None):
-    ensure_user(interaction.user)
-    if choice not in ("heads","tails"):
-        await interaction.response.send_message("Choice must be heads or tails.", ephemeral=True)
+async def log_to_channel(message):
+    try:
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(message)
+    except Exception as e:
+        print(f"Error logging to channel: {e}")
+
+# Check function to verify the channel
+def is_allowed_channel(ctx):
+    return ctx.channel.id == GAMBLING_CHANNEL_ID and ctx.channel.category_id == ALLOWED_CATEGORY_ID
+
+# Commands
+@bot.command(name='coinflip')
+@commands.check(is_allowed_channel)
+async def coinflip(ctx, user: discord.User = None, amount: int = 0):
+    if amount <= 0:
+        await ctx.send("Please specify a valid amount to bet!")
         return
-    if not can_afford(interaction.user, amount):
-        await interaction.response.send_message("Not enough dabloons.", ephemeral=True)
+    
+    # Check if user has enough balance
+    balance = get_user_balance(ctx.author.id)
+    if amount > balance:
+        await ctx.send("You don't have enough dabloons for this bet!")
         return
-    view = CoinflipView(interaction.user, user, amount, choice)
-    await interaction.response.send_message(f"🪙 **Coinflip**\nBet: {amount}\nChoice: {choice}\n{'Waiting for opponent...' if user else 'AI will play after 120s'}", view=view)
-    view.message = await interaction.original_response()
+    
+    # Determine opponent
+    opponent = user if user else "AI"
+    
+    # Flip coin
+    result = random.choice(["heads", "tails"])
+    won = random.choice([True, False])  # 50/50 chance
+    
+    if won:
+        update_balance(ctx.author.id, amount)
+        update_game_stats(ctx.author.id, "coinflip", True)
+        log_transaction(ctx.author.id, "coinflip", amount, "win")
+        await ctx.send(f"You won {amount} dabloons! The coin landed on {result}.")
+        await log_to_channel(f"🪙 {ctx.author.mention} won {amount} dabloons in coinflip against {opponent}!")
+    else:
+        update_balance(ctx.author.id, -amount)
+        update_game_stats(ctx.author.id, "coinflip", False)
+        log_transaction(ctx.author.id, "coinflip", amount, "loss")
+        await ctx.send(f"You lost {amount} dabloons! The coin landed on {result}.")
+        await log_to_channel(f"🪙 {ctx.author.mention} lost {amount} dabloons in coinflip against {opponent}!")
 
-@tree.command(name="giveaway", description="Start a dabloon giveaway")
-async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
-    winners = max(1, min(4, winners))
-    view = GiveawayView(amount, winners, duration)
-    await interaction.response.send_message(f"🎉 **Giveaway Started** 🎉\nAmount: {amount}\nWinners: {winners}\nDuration: {duration}s", view=view)
-    view.message = await interaction.original_response()
-
-@tree.command(name="wl", description="View win/loss stats and balance")
-async def wl(interaction: discord.Interaction, user: Optional[discord.Member] = None):
-    target = user or interaction.user
-    ensure_user(target)
-    s = stats[target.id]
-    await interaction.response.send_message(f"📊 **Stats for {target.display_name}**\n💰 Balance: {balances[target.id]} dabloons\n\n🃏 Blackjack: {s['bj_w']}W / {s['bj_l']}L\n🪙 Coinflip: {s['cf_w']}W / {s['cf_l']}L")
-
-@tree.command(name="leaderboard", description="Top dabloon holders")
-async def leaderboard(interaction: discord.Interaction):
-    if not balances:
-        await interaction.response.send_message("No data yet.", ephemeral=True)
+@bot.command(name='blackjack')
+@commands.check(is_allowed_channel)
+async def blackjack(ctx, amount: int = 0):
+    if amount <= 0:
+        await ctx.send("Please specify a valid amount to bet!")
         return
-    top = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:10]
-    medals = ["🥇","🥈","🥉"]
-    lines = []
-    for i, (uid, bal) in enumerate(top):
-        member = interaction.guild.get_member(uid)
-        if not member: continue
-        prefix = medals[i] if i < 3 else f"`#{i+1}`"
-        lines.append(f"{prefix} **{member.display_name}** — {bal} dabloons")
-    await interaction.response.send_message("🏆 **Dabloon Leaderboard** 🏆\n\n" + "\n".join(lines))
+    
+    # Check if user has enough balance
+    balance = get_user_balance(ctx.author.id)
+    if amount > balance:
+        await ctx.send("You don't have enough dabloons for this bet!")
+        return
+    
+    # Simplified blackjack implementation
+    player_hand = [random.randint(2, 11), random.randint(2, 11)]
+    dealer_hand = [random.randint(2, 11), random.randint(2, 11)]
+    
+    player_total = sum(player_hand)
+    dealer_total = sum(dealer_hand)
+    
+    # Basic game logic (you'd want to expand this)
+    if player_total > 21:
+        won = False
+    elif dealer_total > 21:
+        won = True
+    elif player_total > dealer_total:
+        won = True
+    else:
+        won = False
+    
+    if won:
+        update_balance(ctx.author.id, amount)
+        update_game_stats(ctx.author.id, "blackjack", True)
+        log_transaction(ctx.author.id, "blackjack", amount, "win")
+        await ctx.send(f"You won {amount} dabloons! Your hand: {player_hand} vs Dealer: {dealer_hand}")
+        await log_to_channel(f"🃏 {ctx.author.mention} won {amount} dabloons in blackjack!")
+    else:
+        update_balance(ctx.author.id, -amount)
+        update_game_stats(ctx.author.id, "blackjack", False)
+        log_transaction(ctx.author.id, "blackjack", amount, "loss")
+        await ctx.send(f"You lost {amount} dabloons! Your hand: {player_hand} vs Dealer: {dealer_hand}")
+        await log_to_channel(f"🃏 {ctx.author.mention} lost {amount} dabloons in blackjack!")
 
-# -----------------------
-# GUILD SYNC
-# -----------------------
-@bot.event
-async def setup_hook():
-    guild = discord.Object(id=GUILD_ID)
-    await tree.sync(guild=guild)  # FORCE instant registration
-    print(f"Synced commands to guild {guild.id}")
+@bot.command(name='leaderboard')
+@commands.check(is_allowed_channel)
+async def leaderboard(ctx, user: discord.User = None):
+    if user:
+        # Show specific user stats
+        cursor.execute("""
+        SELECT coinflip_wins, coinflip_losses, blackjack_wins, blackjack_losses, dabloons 
+        FROM users WHERE user_id=?
+        """, (user.id,))
+        result = cursor.fetchone()
+        if result:
+            cf_wins, cf_losses, bj_wins, bj_losses, dabloons = result
+            cf_ratio = cf_wins / (cf_wins + cf_losses) if (cf_wins + cf_losses) > 0 else 0
+            bj_ratio = bj_wins / (bj_wins + bj_losses) if (bj_wins + bj_losses) > 0 else 0
+            
+            embed = discord.Embed(title=f"{user.display_name}'s Stats")
+            embed.add_field(name="Dabloons", value=str(dabloons), inline=False)
+            embed.add_field(name="Coinflip", value=f"Wins: {cf_wins}, Losses: {cf_losses}, Win Rate: {cf_ratio:.2%}")
+            embed.add_field(name="Blackjack", value=f"Wins: {bj_wins}, Losses: {bj_losses}, Win Rate: {bj_ratio:.2%}")
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("User not found in database!")
+    else:
+        # Show overall leaderboard
+        cursor.execute("""
+        SELECT user_id, dabloons, 
+               coinflip_wins, coinflip_losses,
+               blackjack_wins, blackjack_losses
+        FROM users 
+        ORDER BY dabloons DESC
+        LIMIT 10
+        """)
+        
+        results = cursor.fetchall()
+        
+        embed = discord.Embed(title="Dabloons Leaderboard")
+        embed.description = ""
+        
+        for i, (user_id, dabloons, cf_wins, cf_losses, bj_wins, bj_losses) in enumerate(results, 1):
+            try:
+                user = await bot.fetch_user(user_id)
+                username = user.display_name
+            except:
+                username = f"User {user_id}"
+            
+            cf_ratio = cf_wins / (cf_wins + cf_losses) if (cf_wins + cf_losses) > 0 else 0
+            bj_ratio = bj_wins / (bj_wins + bj_losses) if (bj_wins + bj_losses) > 0 else 0
+            
+            embed.description += f"**#{i}** {username}: {dabloons} dabloons\n"
+            embed.description += f"  Coinflip: {cf_ratio:.2%} | Blackjack: {bj_ratio:.2%}\n\n"
+        
+        await ctx.send(embed=embed)
 
-# -----------------------
-# READY
-# -----------------------
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-    guild = discord.Object(id=GUILD_ID)
-    print("Registered commands:")
-    for cmd in tree.get_commands(guild=guild):
-        print(f"- {cmd.name}")
-
-# -----------------------
-# RUN BOT
-# -----------------------
-bot.run(TOKEN)
+@bot.command(name='history')
+@commands.check(is_allowed_channel)
+async def history(ctx, limit: int = 10):
+    cursor.execute("""
+    SELECT game, amount, result, timestamp 
+   
