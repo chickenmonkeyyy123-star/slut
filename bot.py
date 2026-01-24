@@ -175,5 +175,5 @@ async def blackjack(ctx, bet: int):
     )
     await ctx.send(embed=embed, view=view)
 
-# ----------------- Run Bot -----------------
-bot.run("YOUR_BOT_TOKEN")
+
+
