@@ -176,4 +176,18 @@ async def blackjack(ctx, bet: int):
     await ctx.send(embed=embed, view=view)
 
 
+# Run Bot
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+if not TOKEN:
+    print("ERROR: DISCORD_TOKEN not found in .env")
+    exit(1)
+
+bot.run(TOKEN)
+
+
 
