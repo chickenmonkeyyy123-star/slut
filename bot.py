@@ -90,13 +90,24 @@ class BlackjackGame:
 # =====================
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
-    print(f"✅ Logged in as {bot.user}")
+    try:
+        # Sync commands globally (can take up to an hour to update)
+        await bot.tree.sync()
+        print(f"✅ Logged in as {bot.user}")
+        print(f"✅ Commands synced globally")
+        
+        # If you want instant updates for testing, sync to specific guild:
+        # GUILD_ID = YOUR_GUILD_ID_HERE  # Replace with your server ID
+        # await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        # print(f"✅ Commands synced to guild {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
 
 # =====================
 # Win/Loss command
 # =====================
 @bot.tree.command(name="wl", description="Show win/loss stats and balance")
+@app_commands.describe(user="The user to check stats for (optional)")
 async def wl(interaction: discord.Interaction, user: discord.Member = None):
     target_user = user if user else interaction.user
     data = get_user_data(target_user.id)
@@ -126,6 +137,54 @@ async def wl(interaction: discord.Interaction, user: discord.Member = None):
         value=f"Wins: {data['coinflip_wins']}\nLosses: {data['coinflip_losses']}\nWin Rate: {cf_winrate:.2f}%",
         inline=True
     )
+    
+    await interaction.response.send_message(embed=embed)
+
+# =====================
+# Coinflip command
+# =====================
+@bot.tree.command(name="cf", description="Flip a coin and bet on the outcome")
+@app_commands.describe(side="Choose heads or tails", amount="Amount to bet")
+@app_commands.choices(side=[
+    discord.app_commands.Choice(name="Heads", value="heads"),
+    discord.app_commands.Choice(name="Tails", value="tails")
+])
+async def cf(interaction: discord.Interaction, side: str, amount: int):
+    data = get_user_data(interaction.user.id)
+    
+    if amount <= 0:
+        await interaction.response.send_message("Bet amount must be positive.", ephemeral=True)
+        return
+    
+    if data["balance"] < amount:
+        await interaction.response.send_message("Not enough coins.", ephemeral=True)
+        return
+    
+    # Flip the coin
+    result = random.choice(["heads", "tails"])
+    won = result == side
+    
+    # Update balance and stats
+    if won:
+        data["balance"] += amount
+        data["coinflip_wins"] += 1
+        title = "🎉 You Won!"
+        color = discord.Color.gold()
+        description = f"The coin landed on **{result}**! You won {amount} coins!"
+    else:
+        data["balance"] -= amount
+        data["coinflip_losses"] += 1
+        title = "😢 You Lost"
+        color = discord.Color.red()
+        description = f"The coin landed on **{result}**! You lost {amount} coins."
+    
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color
+    )
+    
+    embed.add_field(name="New Balance", value=f"{data['balance']} coins")
     
     await interaction.response.send_message(embed=embed)
 
@@ -189,19 +248,4 @@ async def bj(interaction: discord.Interaction, amount: int):
                 title=title,
                 description=(
                     f"Your hand: {game.fmt(game.player)} ({p})\n"
-                    f"Dealer: {game.fmt(game.dealer)} ({d})"
-                ),
-                color=color
-            ),
-            view=None
-        )
-    hit.callback = hit_cb
-    stand.callback = stand_cb
-    view.add_item(hit)
-    view.add_item(stand)
-    await interaction.response.send_message(embed=embed, view=view)
-
-# =====================
-# Run bot
-# =====================
-bot.run(TOKEN)
+                    f"Dealer: {game.fmt(game.dealer
