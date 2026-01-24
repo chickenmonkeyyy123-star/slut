@@ -284,6 +284,96 @@ async def leaderboard(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+    # =========================
+# GIVEAWAY SYSTEM
+# =========================
+
+import asyncio
+import random
+import discord
+from discord.ui import View, Button
+from discord import app_commands
+
+
+class GiveawayView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.entries = set()
+
+    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
+    async def enter(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id in self.entries:
+            await interaction.response.send_message(
+                "❌ You already entered this giveaway.",
+                ephemeral=True
+            )
+            return
+
+        self.entries.add(interaction.user.id)
+        await interaction.response.send_message(
+            "✅ You have entered the giveaway!",
+            ephemeral=True
+        )
+
+
+@bot.tree.command(name="giveaway", description="Start a dabloons giveaway")
+@app_commands.describe(
+    amount="Dabloons per winner",
+    duration="Duration in seconds",
+    winners="Number of winners"
+)
+async def giveaway(
+    interaction: discord.Interaction,
+    amount: int,
+    duration: int,
+    winners: int
+):
+    if amount <= 0 or duration <= 0 or winners <= 0:
+        await interaction.response.send_message(
+            "❌ Amount, duration, and winners must be positive numbers.",
+            ephemeral=True
+        )
+        return
+
+    view = GiveawayView()
+
+    embed = discord.Embed(
+        title="🎉 Dabloons Giveaway!",
+        description=(
+            f"💰 **{amount} dabloons** per winner\n"
+            f"👑 **{winners} winner(s)**\n"
+            f"⏰ Ends in **{duration} seconds**\n\n"
+            f"Click 🎉 below to enter!"
+        ),
+        color=discord.Color.gold()
+    )
+
+    await interaction.response.send_message(embed=embed, view=view)
+    message = await interaction.original_response()
+
+    await asyncio.sleep(duration)
+
+    if not view.entries:
+        await message.reply("❌ Giveaway ended — no one entered.")
+        return
+
+    selected = random.sample(
+        list(view.entries),
+        k=min(winners, len(view.entries))
+    )
+
+    mentions = []
+    for user_id in selected:
+        update_balance(user_id, amount)
+        mentions.append(f"<@{user_id}>")
+
+    await message.reply(
+        f"🎊 **GIVEAWAY ENDED!**\n"
+        f"🏆 Winner(s): {', '.join(mentions)}\n"
+        f"💰 Each winner received **{amount} dabloons**!"
+    )
+
+
 # ---------- READY ----------
 @bot.event
 async def on_ready():
