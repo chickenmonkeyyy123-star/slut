@@ -1,193 +1,246 @@
+import os
+import random
+import asyncio
+from typing import Optional
+
 import discord
 from discord.ext import commands
-import random
-import json
-import os
-from discord.ui import Button, View
-
-# ----------------- Bot Setup -----------------
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix='/', intents=intents)
-
-DATA_FILE = "dabloon_data.json"
-
-# ----------------- Data Handling -----------------
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-data = load_data()
-
-def get_user_data(user_id):
-    if str(user_id) not in data:
-        data[str(user_id)] = {
-            "balance": 1000,
-            "blackjack": {"wins": 0, "losses": 0},
-            "coinflip": {"wins": 0, "losses": 0}
-        }
-        save_data(data)
-    return data[str(user_id)]
-
-def update_balance(user_id, amount):
-    user_data = get_user_data(user_id)
-    user_data["balance"] += amount
-    save_data(data)
-
-def update_stats(user_id, game, result):
-    user_data = get_user_data(user_id)
-    user_data[game][result] += 1
-    save_data(data)
-
-# ----------------- Blackjack Game -----------------
-class BlackjackGame:
-    def __init__(self, bet):
-        self.bet = bet
-        self.deck = self.create_deck()
-        random.shuffle(self.deck)
-        self.player_hand = [self.deck.pop(), self.deck.pop()]
-        self.dealer_hand = [self.deck.pop(), self.deck.pop()]
-        self.game_over = False
-
-    def create_deck(self):
-        suits = ['♠', '♥', '♦', '♣']
-        ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
-        deck = []
-        for suit in suits:
-            for rank in ranks:
-                value = 11 if rank == 'A' else 10 if rank in ['J','Q','K'] else int(rank)
-                deck.append({'rank': rank, 'suit': suit, 'value': value})
-        return deck
-
-    def hand_value(self, hand):
-        value = sum(card['value'] for card in hand)
-        aces = sum(1 for card in hand if card['rank'] == 'A')
-        while value > 21 and aces:
-            value -= 10
-            aces -= 1
-        return value
-
-    def hit(self):
-        self.player_hand.append(self.deck.pop())
-        if self.hand_value(self.player_hand) > 21:
-            self.game_over = True
-            return "bust"
-        return "continue"
-
-    def stand(self):
-        while self.hand_value(self.dealer_hand) < 17:
-            self.dealer_hand.append(self.deck.pop())
-        self.game_over = True
-        player_val = self.hand_value(self.player_hand)
-        dealer_val = self.hand_value(self.dealer_hand)
-        if dealer_val > 21 or player_val > dealer_val:
-            return "win"
-        elif player_val < dealer_val:
-            return "lose"
-        else:
-            return "tie"
-
-    def format_hand(self, hand, hide_first=False):
-        if hide_first:
-            return f"?, {hand[1]['rank']}{hand[1]['suit']}"
-        return ", ".join(f"{c['rank']}{c['suit']}" for c in hand)
-
-# ----------------- Blackjack View -----------------
-class BlackjackView(View):
-    def __init__(self, game, user):
-        super().__init__(timeout=60)
-        self.game = game
-        self.user = user
-
-    @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
-    async def hit_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
-        result = self.game.hit()
-        embed = discord.Embed(
-            title="Blackjack",
-            description=f"Your hand: {self.game.format_hand(self.game.player_hand)} (Value: {self.game.hand_value(self.game.player_hand)})\n"
-                        f"Dealer's hand: {self.game.format_hand(self.game.dealer_hand, hide_first=True)}",
-            color=discord.Color.blue()
-        )
-        if result == "bust":
-            embed.description += "\n\n**Bust! You lose!**"
-            embed.color = discord.Color.red()
-            update_balance(self.user.id, -self.game.bet)
-            update_stats(self.user.id, "blackjack", "losses")
-            self.stop()
-            await interaction.response.edit_message(embed=embed, view=None)
-        else:
-            await interaction.response.edit_message(embed=embed)
-
-    @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
-    async def stand_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("This isn't your game!", ephemeral=True)
-        result = self.game.stand()
-        embed = discord.Embed(
-            title="Blackjack",
-            description=f"Your hand: {self.game.format_hand(self.game.player_hand)} (Value: {self.game.hand_value(self.game.player_hand)})\n"
-                        f"Dealer's hand: {self.game.format_hand(self.game.dealer_hand)} (Value: {self.game.hand_value(self.game.dealer_hand)})",
-            color=discord.Color.blue()
-        )
-        if result == "win":
-            embed.description += "\n\n**You win! 🎉**"
-            embed.color = discord.Color.green()
-            update_balance(self.user.id, self.game.bet)
-            update_stats(self.user.id, "blackjack", "wins")
-        elif result == "lose":
-            embed.description += "\n\n**You lose! 😢**"
-            embed.color = discord.Color.red()
-            update_balance(self.user.id, -self.game.bet)
-            update_stats(self.user.id, "blackjack", "losses")
-        else:
-            embed.description += "\n\n**It's a tie!**"
-            embed.color = discord.Color.orange()
-        self.stop()
-        await interaction.response.edit_message(embed=embed, view=None)
-
-# ----------------- Commands -----------------
-@bot.command()
-async def balance(ctx):
-    user_data = get_user_data(ctx.author.id)
-    await ctx.send(f"{ctx.author.mention}, your balance is {user_data['balance']} dabloons.")
-
-@bot.command()
-async def blackjack(ctx, bet: int):
-    user_data = get_user_data(ctx.author.id)
-    if bet > user_data["balance"]:
-        return await ctx.send("You don't have enough dabloons!")
-    game = BlackjackGame(bet)
-    view = BlackjackView(game, ctx.author)
-    embed = discord.Embed(
-        title="Blackjack",
-        description=f"Your hand: {game.format_hand(game.player_hand)} (Value: {game.hand_value(game.player_hand)})\n"
-                    f"Dealer's hand: {game.format_hand(game.dealer_hand, hide_first=True)}",
-        color=discord.Color.blue()
-    )
-    await ctx.send(embed=embed, view=view)
-
-
-# Run Bot
+from discord import app_commands
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
+
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-if not TOKEN:
-    print("ERROR: DISCORD_TOKEN not found in .env")
-    exit(1)
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+tree = bot.tree
+
+# -----------------------------
+# Economy / Stats (in-memory)
+# -----------------------------
+START_BALANCE = 1000
+
+balances = {}
+stats = {}  # user_id: {bj_w, bj_l, cf_w, cf_l}
+
+def ensure_user(user: discord.User):
+    if user.id not in balances:
+        balances[user.id] = START_BALANCE
+    if user.id not in stats:
+        stats[user.id] = {"bj_w": 0, "bj_l": 0, "cf_w": 0, "cf_l": 0}
+
+def can_afford(user, amount):
+    ensure_user(user)
+    return balances[user.id] >= amount
+
+# -----------------------------
+# Blackjack helpers
+# -----------------------------
+def draw_card():
+    return random.choice([2,3,4,5,6,7,8,9,10,10,10,11])
+
+def hand_value(hand):
+    total = sum(hand)
+    aces = hand.count(11)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+# -----------------------------
+# Giveaway View
+# -----------------------------
+class GiveawayView(discord.ui.View):
+    def __init__(self, amount, winners, duration):
+        super().__init__(timeout=duration)
+        self.amount = amount
+        self.winners = winners
+        self.entries = set()
+
+    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
+    async def enter(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ensure_user(interaction.user)
+        self.entries.add(interaction.user.id)
+        await interaction.response.send_message(
+            "You entered the giveaway!", ephemeral=True
+        )
+
+    async def on_timeout(self):
+        if not self.entries:
+            return
+
+        chosen = random.sample(
+            list(self.entries), min(self.winners, len(self.entries))
+        )
+
+        channel = self.message.channel
+        msg = "🎊 **Giveaway Results** 🎊\n"
+        for uid in chosen:
+            balances[uid] += self.amount
+            user = channel.guild.get_member(uid)
+            msg += f"- {user.mention} won **{self.amount} dabloons**\n"
+
+        await channel.send(msg)
+
+# -----------------------------
+# Coinflip View
+# -----------------------------
+class CoinflipView(discord.ui.View):
+    def __init__(self, challenger, target, amount, choice):
+        super().__init__(timeout=120)
+        self.challenger = challenger
+        self.target = target
+        self.amount = amount
+        self.choice = choice
+        self.resolved = False
+
+    @discord.ui.button(label="Accept Coinflip", style=discord.ButtonStyle.blurple)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.target and interaction.user.id != self.target.id:
+            await interaction.response.send_message(
+                "This coinflip isn’t for you.", ephemeral=True
+            )
+            return
+
+        await self.resolve(interaction.channel, interaction.user)
+        await interaction.response.defer()
+
+    async def resolve(self, channel, opponent):
+        if self.resolved:
+            return
+        self.resolved = True
+
+        flip = random.choice(["heads", "tails"])
+        winner = self.challenger if flip == self.choice else opponent
+        loser = opponent if winner == self.challenger else self.challenger
+
+        balances[winner.id] += self.amount
+        balances[loser.id] -= self.amount
+
+        stats[winner.id]["cf_w"] += 1
+        stats[loser.id]["cf_l"] += 1
+
+        await channel.send(
+            f"🪙 Coin landed **{flip.upper()}**!\n"
+            f"🏆 {winner.mention} wins **{self.amount} dabloons**"
+        )
+
+    async def on_timeout(self):
+        if self.target or self.resolved:
+            return
+
+        # AI fallback
+        ai_choice = random.choice(["heads", "tails"])
+        flip = random.choice(["heads", "tails"])
+
+        if flip == self.choice:
+            balances[self.challenger.id] += self.amount
+            stats[self.challenger.id]["cf_w"] += 1
+            result = "won"
+        else:
+            balances[self.challenger.id] -= self.amount
+            stats[self.challenger.id]["cf_l"] += 1
+            result = "lost"
+
+        await self.message.channel.send(
+            f"🪙 AI Coinflip result: **{flip.upper()}**\n"
+            f"You {result} **{self.amount} dabloons**"
+        )
+
+# -----------------------------
+# Commands
+# -----------------------------
+@tree.command(name="giveaway", description="Start a dabloon giveaway")
+@app_commands.describe(amount="Dabloons per winner", duration="Seconds", winners="1-4 winners")
+async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
+    view = GiveawayView(amount, min(max(winners, 1), 4), duration)
+    await interaction.response.send_message(
+        f"🎉 **Giveaway Started** 🎉\n"
+        f"Amount: {amount}\nWinners: {winners}\nTime: {duration}s",
+        view=view
+    )
+    view.message = await interaction.original_response()
+
+@tree.command(name="bj", description="Play blackjack vs AI")
+async def bj(interaction: discord.Interaction, amount: int):
+    ensure_user(interaction.user)
+    if not can_afford(interaction.user, amount):
+        await interaction.response.send_message("Not enough dabloons.", ephemeral=True)
+        return
+
+    player = [draw_card(), draw_card()]
+    dealer = [draw_card(), draw_card()]
+
+    while hand_value(player) < 17:
+        player.append(draw_card())
+    while hand_value(dealer) < 17:
+        dealer.append(draw_card())
+
+    p, d = hand_value(player), hand_value(dealer)
+
+    if p > 21 or (d <= 21 and d > p):
+        balances[interaction.user.id] -= amount
+        stats[interaction.user.id]["bj_l"] += 1
+        result = "You lost"
+    else:
+        balances[interaction.user.id] += amount
+        stats[interaction.user.id]["bj_w"] += 1
+        result = "You won"
+
+    await interaction.response.send_message(
+        f"🃏 **Blackjack**\n"
+        f"Your hand: {player} ({p})\n"
+        f"Dealer: {dealer} ({d})\n"
+        f"**{result} {amount} dabloons**"
+    )
+
+@tree.command(name="cf", description="Coinflip vs user or AI")
+async def cf(
+    interaction: discord.Interaction,
+    amount: int,
+    choice: str,
+    user: Optional[discord.Member] = None
+):
+    ensure_user(interaction.user)
+
+    if choice not in ["heads", "tails"]:
+        await interaction.response.send_message("Choose heads or tails.", ephemeral=True)
+        return
+
+    if not can_afford(interaction.user, amount):
+        await interaction.response.send_message("Not enough dabloons.", ephemeral=True)
+        return
+
+    view = CoinflipView(interaction.user, user, amount, choice)
+    await interaction.response.send_message(
+        f"🪙 **Coinflip Challenge**\n"
+        f"Bet: {amount}\nChoice: {choice}\n"
+        f"{'Waiting for opponent...' if user else 'Waiting 120s before AI plays'}",
+        view=view
+    )
+    view.message = await interaction.original_response()
+
+@tree.command(name="wl", description="Check win/loss stats and balance")
+async def wl(interaction: discord.Interaction, user: Optional[discord.Member] = None):
+    target = user or interaction.user
+    ensure_user(target)
+    s = stats[target.id]
+
+    await interaction.response.send_message(
+        f"📊 **Stats for {target.display_name}**\n"
+        f"💰 Balance: {balances[target.id]} dabloons\n\n"
+        f"🃏 Blackjack: {s['bj_w']}W / {s['bj_l']}L\n"
+        f"🪙 Coinflip: {s['cf_w']}W / {s['cf_l']}L"
+    )
+
+# -----------------------------
+# Startup
+# -----------------------------
+@bot.event
+async def on_ready():
+    await tree.sync()
+    print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
-
-
-
