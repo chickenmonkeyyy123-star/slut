@@ -6,8 +6,6 @@ import random
 import json
 import os
 from dotenv import load_dotenv
-import asyncio
-from datetime import datetime, timedelta
 
 # ---------- LOAD .ENV ----------
 load_dotenv()
@@ -18,7 +16,7 @@ if not TOKEN:
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
 START_BALANCE = 1000
-GUILD_ID = 1332118870181412936
+GUILD_ID = 1332118870181412936  # Your guild
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
@@ -153,7 +151,7 @@ class BlackjackView(View):
             elif dv > 21 or pv > dv:
                 u["balance"] += bet * 2
                 u["blackjack"]["wins"] += 1
-                result += f"✅ Hand {i+1} wins (+{bet})\n"
+                result += f"✅ Hand {i+1} wins (+{bet*2})\n"
             elif pv < dv:
                 u["blackjack"]["losses"] += 1
                 result += f"❌ Hand {i+1} loses\n"
@@ -181,7 +179,8 @@ class BlackjackView(View):
         await self.advance(interaction)
 
 # ---------- COMMANDS ----------
-@bot.tree.command(name="bj")
+@bot.tree.command(name="bj", description="Play blackjack with a bet")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def bj(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
     if amount <= 0 or amount > u["balance"]:
@@ -195,13 +194,14 @@ async def bj(interaction: discord.Interaction, amount: int):
     view = BlackjackView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
-@bot.tree.command(name="cf")
+@bot.tree.command(name="cf", description="Coinflip a bet")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def cf(interaction: discord.Interaction, amount: int, choice: str):
     choice = choice.lower()
     u = get_user(interaction.user.id)
 
     if choice not in ["heads", "tails"]:
-        return await interaction.response.send_message("heads or tails only.", ephemeral=True)
+        return await interaction.response.send_message("Choose heads or tails.", ephemeral=True)
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
 
@@ -212,7 +212,7 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str):
     if result == choice:
         u["balance"] += amount * 2
         u["coinflip"]["wins"] += 1
-        msg = f"🪙 **{result.upper()}** — You won **{amount}**!"
+        msg = f"🪙 **{result.upper()}** — You won **{amount*2}**!"
     else:
         u["coinflip"]["losses"] += 1
         msg = f"🪙 **{result.upper()}** — You lost **{amount}**."
@@ -220,7 +220,8 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str):
     save_data()
     await interaction.response.send_message(msg)
 
-@bot.tree.command(name="leaderboard")
+@bot.tree.command(name="leaderboard", description="Top 10 users")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
 async def leaderboard(interaction: discord.Interaction):
     sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
     lines = []
