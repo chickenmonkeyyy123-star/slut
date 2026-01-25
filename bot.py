@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button
 import random, json, os, asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 # ================== SETUP ==================
@@ -14,6 +14,7 @@ DATA_FILE = "dabloon_data.json"
 GUILD_ID = 1332118870181412936
 
 intents = discord.Intents.default()
+intents.message_content = True  # Needed for privileged intent warning
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ================== DATA ==================
@@ -75,18 +76,9 @@ class BlackjackView(View):
     def embed(self, reveal=False):
         pv = hand_value(self.player)
         dv = hand_value(self.dealer if reveal else [self.dealer[0]])
-
         e = discord.Embed(title="🃏 Blackjack", color=0x2ecc71)
-        e.add_field(
-            name="🧍 Your Hand",
-            value=f"`{fmt_hand(self.player)}` → **{pv}**",
-            inline=False
-        )
-        e.add_field(
-            name="🎩 Dealer",
-            value=f"`{fmt_hand(self.dealer) if reveal else fmt_hand([self.dealer[0]]) + ' ❓'}` → **{dv}**",
-            inline=False
-        )
+        e.add_field(name="🧍 Your Hand", value=f"`{fmt_hand(self.player)}` → **{pv}**", inline=False)
+        e.add_field(name="🎩 Dealer", value=f"`{fmt_hand(self.dealer) if reveal else fmt_hand([self.dealer[0]]) + ' ❓'}` → **{dv}**", inline=False)
         e.set_footer(text=f"Bet: {self.bet} dabloons")
         return e
 
@@ -142,63 +134,40 @@ class BlackjackView(View):
 # ================== COMMANDS ==================
 
 @bot.tree.command(name="bj")
+@app_commands.describe(amount="Amount to bet")
 async def bj(interaction: discord.Interaction, amount: int):
     data = load_data()
     user = get_user(data, interaction.user.id)
     if amount <= 0 or user["balance"] < amount:
         await interaction.response.send_message("Invalid bet", ephemeral=True)
         return
-
     view = BlackjackView(interaction, amount, data)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
-# ================== COINFLIP (LIVE TIMER) ==================
-
 @bot.tree.command(name="cf")
+@app_commands.describe(amount="Amount to bet", opponent="Opponent to challenge")
 async def cf(interaction: discord.Interaction, amount: int, opponent: discord.User):
     data = load_data()
     p1 = get_user(data, interaction.user.id)
     p2 = get_user(data, opponent.id)
-
     if p1["balance"] < amount or p2["balance"] < amount:
         await interaction.response.send_message("One player lacks funds", ephemeral=True)
         return
 
-    msg = await interaction.response.send_message(
-        f"🪙 **Coinflip Challenge**\n{opponent.mention}, you have **60 seconds** to accept!",
-        view=None
-    )
-
-    message = await interaction.original_response()
-
-    for t in range(60, 0, -1):
-        await message.edit(content=f"🪙 **Coinflip Challenge**\n⏳ Time left: **{t}s**")
-        await asyncio.sleep(1)
-
     winner = random.choice([interaction.user, opponent])
     loser = opponent if winner == interaction.user else interaction.user
-
     get_user(data, winner.id)["balance"] += amount
     get_user(data, loser.id)["balance"] -= amount
     save_data(data)
-
-    await message.edit(content=f"🎉 **{winner.mention} won {amount} dabloons!**")
-
-# ================== LEADERBOARD ==================
+    await interaction.response.send_message(f"🎉 **{winner.mention} won {amount} dabloons!**")
 
 @bot.tree.command(name="lb")
 async def lb(interaction: discord.Interaction):
     data = load_data()
     top = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
-
     e = discord.Embed(title="🏆 Dabloons Leaderboard", color=0xf1c40f)
     for i, (uid, u) in enumerate(top, 1):
-        e.add_field(
-            name=f"#{i}",
-            value=f"<@{uid}> — 💰 {u['balance']}",
-            inline=False
-        )
-
+        e.add_field(name=f"#{i}", value=f"<@{uid}> — 💰 {u['balance']}", inline=False)
     await interaction.response.send_message(embed=e)
 
 # ================== READY ==================
@@ -208,8 +177,6 @@ async def on_ready():
     guild = discord.Object(id=GUILD_ID)
     bot.tree.clear_commands(guild=guild)
     await bot.tree.sync(guild=guild)
-    bot.tree.copy_global_to(guild=guild)
-    await bot.tree.sync(guild=guild)
-    print("✅ Commands synced")
+    print("✅ Commands synced and bot ready")
 
 bot.run(TOKEN)
