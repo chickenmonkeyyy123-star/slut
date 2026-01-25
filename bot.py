@@ -22,7 +22,6 @@ GUILD_ID = 1332118870181412936  # replace with your server ID
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
-intents.guilds = True  # ✅ REQUIRED for slash commands
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------- DATA ----------
@@ -54,22 +53,6 @@ def total_wl(u):
         u["blackjack"]["wins"] + u["coinflip"]["wins"],
         u["blackjack"]["losses"] + u["coinflip"]["losses"],
     )
-
-# ---------- READY ----------
-@bot.event
-async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)  # ✅ Sync commands to guild
-    print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
-
-# ---------- SYNC COMMAND ----------
-@bot.tree.command(name="sync")
-async def sync(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Only admins can sync.", ephemeral=True)
-    guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)
-    await interaction.response.send_message("✅ Commands fully synced.", ephemeral=True)
 
 # ---------- BLACKJACK ----------
 class BlackjackGame:
@@ -250,20 +233,16 @@ class CoinflipView(View):
     @discord.ui.button(label="Accept Coinflip", style=discord.ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.opponent.id:
-            return await interaction.response.send_message("You are not the challenged user.", ephemeral=True)
-
+            return await interaction.response.send_message("Not your challenge.", ephemeral=True)
         self.accepted = True
         u1 = get_user(self.challenger.id)
         u2 = get_user(self.opponent.id)
-
         if u1["balance"] < self.amount:
             return await interaction.response.edit_message(f"❌ {self.challenger.mention} doesn't have enough balance.", view=None)
         if u2["balance"] < self.amount:
             return await interaction.response.edit_message(f"❌ {self.opponent.mention} doesn't have enough balance.", view=None)
-
         u1["balance"] -= self.amount
         u2["balance"] -= self.amount
-
         winner = random.choice([self.challenger.id, self.opponent.id])
         if winner == self.challenger.id:
             u1["balance"] += self.amount*2
@@ -275,7 +254,6 @@ class CoinflipView(View):
             u2["coinflip"]["wins"] += 1
             u1["coinflip"]["losses"] += 1
             msg = f"🪙 {self.opponent.mention} won **{self.amount*2} dabloons**!"
-
         save_data()
         self.stop()
         await interaction.response.edit_message(content=msg, view=None)
@@ -283,7 +261,7 @@ class CoinflipView(View):
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.red)
     async def decline(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.opponent.id:
-            return await interaction.response.send_message("You are not the challenged user.", ephemeral=True)
+            return await interaction.response.send_message("Not your challenge.", ephemeral=True)
         self.stop()
         await interaction.response.edit_message(f"❌ {self.opponent.mention} declined the coinflip.", view=None)
 
@@ -336,18 +314,9 @@ async def cf(
     # PvP coinflip
     opponent = get_user(user.id)
     if opponent["balance"] < amount:
-        return await interaction.response.send_message(
-            f"{user.mention} doesn't have enough balance.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message(f"{user.mention} doesn't have enough balance.", ephemeral=True)
     view = CoinflipView(interaction.user, user, amount, choice)
-    await interaction.response.send_message(
-        f"🪙 **Coinflip Challenge**\n"
-        f"{interaction.user.mention} vs {user.mention}\n"
-        f"Bet: **{amount} dabloons**\n"
-        f"{user.mention}, click **Accept Coinflip**",
-        view=view
-    )
+    await interaction.response.send_message(f"🪙 **Coinflip Challenge**\n{interaction.user.mention} vs {user.mention}\nBet: **{amount} dabloons**\n{user.mention}, click **Accept Coinflip**", view=view)
 
 @bot.tree.command(name="lb")
 async def lb(interaction: discord.Interaction):
@@ -382,11 +351,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, duration: int,
     if amount <= 0 or duration <= 0 or winners <= 0:
         return await interaction.response.send_message("❌ Amount, duration, and winners must be positive.", ephemeral=True)
     view = GiveawayView()
-    embed = discord.Embed(
-        title="🎉 Dabloons Giveaway!",
-        description=f"💰 **{amount}** per winner\n👑 {winners} winner(s)\n⏰ Ends in {duration} seconds\nClick below to enter!",
-        color=discord.Color.gold()
-    )
+    embed = discord.Embed(title="🎉 Dabloons Giveaway!", description=f"💰 **{amount}** per winner\n👑 {winners} winner(s)\n⏰ Ends in {duration} seconds\nClick below to enter!", color=discord.Color.gold())
     await interaction.response.send_message(embed=embed, view=view)
     message = await interaction.original_response()
     await asyncio.sleep(duration)
@@ -421,7 +386,7 @@ async def claim(interaction: discord.Interaction):
     save_data()
     await interaction.response.send_message(f"🎉 You claimed **{reward} dabloons**!\n💰 New balance: {user['balance']}", ephemeral=True)
 
-# ---------- SYNC ----------
+# ---------- SYNC COMMAND ----------
 @bot.tree.command(name="sync")
 async def sync(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
@@ -430,11 +395,11 @@ async def sync(interaction: discord.Interaction):
     await bot.tree.sync(guild=guild)
     await interaction.response.send_message("✅ Commands fully synced.", ephemeral=True)
 
-# ---------- READY ----------
+# ---------- ON READY ----------
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)  # ensures Discord always has correct commands
+    await bot.tree.sync(guild=guild)  # auto-sync on startup
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
