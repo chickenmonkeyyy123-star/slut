@@ -419,7 +419,7 @@ async def sync(interaction: discord.Interaction):
             "❌ Only server admins can sync commands.",
             ephemeral=True
         )
-    guild = discord.Object(id=GUILD_ID)
+    guild = discord.Object(id=1332118870181412936)
     await bot.tree.sync(guild=guild)
     await interaction.response.send_message("✅ Commands fully resynced.", ephemeral=True)
 
@@ -431,4 +431,5 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
 
