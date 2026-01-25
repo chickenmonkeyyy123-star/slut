@@ -74,9 +74,10 @@ def check_balance(user_id, amount):
     
     if user_id_str not in data:
         data[user_id_str] = {
-            "balance": 10000,
+            "balance": 1000,  # Changed from 10000 to 1000
             "blackjack": {"wins": 0, "losses": 0},
-            "coinflip": {"wins": 0, "losses": 0}
+            "coinflip": {"wins": 0, "losses": 0},
+            "last_claim": None
         }
         save_data(data)
     
@@ -89,9 +90,10 @@ def update_balance(user_id, amount, game_type, result):
     
     if user_id_str not in data:
         data[user_id_str] = {
-            "balance": 10000,
+            "balance": 1000,  # Changed from 10000 to 1000
             "blackjack": {"wins": 0, "losses": 0},
-            "coinflip": {"wins": 0, "losses": 0}
+            "coinflip": {"wins": 0, "losses": 0},
+            "last_claim": None
         }
     
     data[user_id_str]["balance"] += amount
@@ -123,6 +125,47 @@ async def on_ready():
         print(f"Synced {len(synced)} command(s) to guild {SERVER_ID}")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
+
+# Claim command
+@bot.tree.command(name="claim", description="Claim 1000 dabloons every hour if your balance is under 1000", guild=discord.Object(id=SERVER_ID))
+async def claim(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    data = load_data()
+    
+    if user_id not in data:
+        data[user_id] = {
+            "balance": 1000,
+            "blackjack": {"wins": 0, "losses": 0},
+            "coinflip": {"wins": 0, "losses": 0},
+            "last_claim": None
+        }
+    
+    # Check if user can claim
+    now = datetime.now()
+    last_claim = data[user_id].get("last_claim")
+    
+    if last_claim:
+        last_claim_date = datetime.fromisoformat(last_claim)
+        time_since_claim = now - last_claim_date
+        
+        if time_since_claim < timedelta(hours=1):
+            time_left = timedelta(hours=1) - time_since_claim
+            hours, remainder = divmod(time_left.total_seconds(), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            await interaction.response.send_message(f"You need to wait {int(hours)}h {int(minutes)}m {int(seconds)}s before you can claim again!")
+            return
+    
+    # Check if balance is under 1000
+    if data[user_id]["balance"] >= 1000:
+        await interaction.response.send_message("You can only claim dabloons if your balance is under 1000!")
+        return
+    
+    # Update balance and last claim time
+    data[user_id]["balance"] += 1000
+    data[user_id]["last_claim"] = now.isoformat()
+    save_data(data)
+    
+    await interaction.response.send_message(f"You've claimed 1000 dabloons! Your new balance is {data[user_id]['balance']} dabloons.")
 
 # Blackjack command
 @bot.tree.command(name="bj", description="Play blackjack against the AI", guild=discord.Object(id=SERVER_ID))
@@ -175,44 +218,4 @@ async def blackjack(interaction: discord.Interaction, amount: float):
         view=view
     )
     
-    # Store game state
-    blackjack_games[user_id] = {
-        "deck": deck,
-        "player_hand": player_hand,
-        "dealer_hand": dealer_hand,
-        "bet": amount,
-        "doubled_down": False,
-        "split": False,
-        "message": None
-    }
-
-# Blackjack view with buttons
-class BlackjackView(discord.ui.View):
-    def __init__(self, user_id, bet, player_hand, dealer_hand, deck):
-        super().__init__(timeout=60)  # 60 second timeout
-        self.user_id = user_id
-        self.bet = bet
-        self.player_hand = player_hand
-        self.dealer_hand = dealer_hand
-        self.deck = deck
-        self.doubled_down = False
-        
-        # Disable split button if cards are not the same rank
-        if player_hand[0]['rank'] != player_hand[1]['rank']:
-            self.children[3].disabled = True
-    
-    async def on_timeout(self):
-        # End the game if no action is taken
-        if self.user_id in blackjack_games:
-            update_balance(self.user_id, -self.bet, "blackjack", "loss")
-            await self.message.edit(content=f"**Game timed out! You lose!**\n\nYou lost {self.bet} dabloons.", view=None)
-            del blackjack_games[self.user_id]
-    
-    @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary)
-    async def hit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your game!", ephemeral=True)
-            return
-        
-        # Draw a card
-        self.player_hand.append(self.deck
+    # Store
