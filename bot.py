@@ -426,8 +426,9 @@ async def sync(interaction: discord.Interaction):
 # ---------- READY ----------
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
+    guild = discord.Object(id=1332118870181412936)
     await bot.tree.sync(guild=guild)  # ensure commands appear immediately
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
