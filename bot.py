@@ -235,7 +235,7 @@ class BlackjackView(View):
             return await interaction.response.send_message("Cannot split now.", ephemeral=True)
         if u["balance"] < self.game.bets[self.game.current_hand]:
             return await interaction.response.send_message("Not enough balance to split.", ephemeral=True)
-        u["balance"] -= self.game.bets[self.game.current_hand]]
+        u["balance"] -= self.game.bets[self.game.current_hand]
         self.game.split()
         save_data()
         await interaction.response.edit_message(embed=self.embed(), view=self)
@@ -476,3 +476,4 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
