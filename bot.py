@@ -115,16 +115,17 @@ def update_balance(user_id, amount, game_type, result):
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} servers')
-            
+    
+    # Sync commands with the server
     try:
-            guild = discord.Object(id=SERVER_ID)
-            synced = await bot.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} command(s) to guild {SERVER_ID}")
-    except Exception as e2:
-            print(f"Failed to sync commands to guild: {e2}")
+        guild = discord.Object(id=SERVER_ID)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"Synced {len(synced)} command(s) to guild {SERVER_ID}")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
 # Blackjack command
-@bot.tree.command(name="bj", description="Play blackjack against the AI")
+@bot.tree.command(name="bj", description="Play blackjack against the AI", guild=discord.Object(id=SERVER_ID))
 @app_commands.describe(amount="The amount of dabloons to bet")
 async def blackjack(interaction: discord.Interaction, amount: float):
     user_id = str(interaction.user.id)
@@ -214,20 +215,4 @@ class BlackjackView(discord.ui.View):
             return
         
         # Draw a card
-        self.player_hand.append(self.deck.pop())
-        player_value = hand_value(self.player_hand)
-        
-        # Check for bust
-        if player_value > 21:
-            update_balance(self.user_id, -self.bet, "blackjack", "loss")
-            dealer_value = hand_value(self.dealer_hand)
-            await interaction.response
-
-try:
-    bot.run(TOKEN)
-except Exception as e:
-    print(f"Error running bot: {e}")
-    
-    import time
-    while True:
-        time.sleep(60)
+        self.player_hand.append(self.deck
