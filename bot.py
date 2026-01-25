@@ -222,3 +222,12 @@ class BlackjackView(discord.ui.View):
             update_balance(self.user_id, -self.bet, "blackjack", "loss")
             dealer_value = hand_value(self.dealer_hand)
             await interaction.response
+
+try:
+    bot.run(TOKEN)
+except Exception as e:
+    print(f"Error running bot: {e}")
+    
+    import time
+    while True:
+        time.sleep(60)
