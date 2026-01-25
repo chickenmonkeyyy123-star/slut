@@ -206,7 +206,7 @@ class BlackjackView(View):
         await self.advance(interaction)
 
     @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
-    async def double(self, interaction: discord.Interation, button: Button):
+    async def double(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
             return await interaction.response.send_message("Not your game.", ephemeral=True)
         u = get_user(self.user.id)
@@ -431,3 +431,4 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
