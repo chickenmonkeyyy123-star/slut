@@ -22,6 +22,7 @@ GUILD_ID = 1332118870181412936
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------- DATA ----------
@@ -180,6 +181,53 @@ class BlackjackView(View):
         self.game.stand()
         await self.advance(interaction)
 
+# ---------- COINFLIP CHALLENGE VIEW ----------
+class CoinflipChallengeView(View):
+    def __init__(self, challenger, target, amount, choice):
+        super().__init__(timeout=30)
+        self.challenger = challenger
+        self.target = target
+        self.amount = amount
+        self.choice = choice.lower()
+        self.accepted = False
+
+    async def end_game(self, interaction, winner=None, result=None):
+        u1 = get_user(self.challenger.id)
+        u2 = get_user(self.target.id)
+
+        if winner is None:  # declined or timeout
+            u1["balance"] += self.amount
+            u2["balance"] += 0
+            await interaction.response.edit_message(content="Challenge not accepted in time.", view=None)
+        else:
+            if winner == self.challenger:
+                u1["balance"] += self.amount * 2
+                u1["coinflip"]["wins"] += 1
+                u2["coinflip"]["losses"] += 1
+                msg = f"🪙 {self.challenger.mention} won the coinflip against {self.target.mention}! (+{self.amount})"
+            else:
+                u2["balance"] += self.amount * 2
+                u2["coinflip"]["wins"] += 1
+                u1["coinflip"]["losses"] += 1
+                msg = f"🪙 {self.target.mention} won the coinflip against {self.challenger.mention}! (+{self.amount})"
+            await interaction.response.edit_message(content=msg, view=None)
+        save_data()
+        self.stop()
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.target.id:
+            return await interaction.response.send_message("You are not the challenged user.", ephemeral=True)
+        self.accepted = True
+        result = random.choice([self.challenger, self.target])
+        await self.end_game(interaction, winner=result)
+
+    @discord.ui.button(label="Decline", style=discord.ButtonStyle.red)
+    async def decline(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.target.id:
+            return await interaction.response.send_message("You are not the challenged user.", ephemeral=True)
+        await self.end_game(interaction, winner=None)
+
 # ---------- COMMANDS ----------
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @bot.tree.command(name="bj", description="Play blackjack")
@@ -196,29 +244,35 @@ async def bj(interaction: discord.Interaction, amount: int):
     await interaction.response.send_message(embed=view.embed(), view=view)
 
 @app_commands.guilds(discord.Object(id=GUILD_ID))
-@bot.tree.command(name="cf", description="Flip a coin")
-async def cf(interaction: discord.Interaction, amount: int, choice: str):
-    choice = choice.lower()
+@bot.tree.command(name="cf", description="Flip a coin or challenge a user")
+async def cf(interaction: discord.Interaction, amount: int, choice: str, user: discord.User = None):
     u = get_user(interaction.user.id)
-
-    if choice not in ["heads", "tails"]:
-        return await interaction.response.send_message("heads or tails only.", ephemeral=True)
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
 
-    u["balance"] -= amount  # take money immediately
-
-    result = random.choice(["heads", "tails"])
-    if result == choice:
-        u["balance"] += amount * 2  # give back double if won
-        u["coinflip"]["wins"] += 1
-        msg = f"🪙 **{result.upper()}** — You won **{amount}**!"
+    if user and user.id != interaction.user.id:
+        # Challenge another user
+        target_user = user
+        v = CoinflipChallengeView(interaction.user, target_user, amount, choice)
+        u["balance"] -= amount  # take money from challenger
+        save_data()
+        await interaction.response.send_message(
+            content=f"{target_user.mention}, you have been challenged to a coinflip by {interaction.user.mention} for {amount}!\nChoice: {choice}",
+            view=v
+        )
     else:
-        u["coinflip"]["losses"] += 1
-        msg = f"🪙 **{result.upper()}** — You lost **{amount}**."
-
-    save_data()
-    await interaction.response.send_message(msg)
+        # Play against AI
+        u["balance"] -= amount
+        result = random.choice(["heads", "tails"])
+        if result == choice.lower():
+            u["balance"] += amount * 2
+            u["coinflip"]["wins"] += 1
+            msg = f"🪙 **{result.upper()}** — You won **{amount}**!"
+        else:
+            u["coinflip"]["losses"] += 1
+            msg = f"🪙 **{result.upper()}** — You lost **{amount}**."
+        save_data()
+        await interaction.response.send_message(msg)
 
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @bot.tree.command(name="leaderboard", description="Show top balances")
@@ -236,7 +290,7 @@ async def leaderboard(interaction: discord.Interaction):
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
     try:
-        await bot.tree.sync(guild=guild)  # sync guild commands
+        await bot.tree.sync(guild=guild)
         print(f"Synced commands to guild {GUILD_ID}")
     except Exception as e:
         print(f"Error syncing commands: {e}")
