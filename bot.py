@@ -115,18 +115,12 @@ def update_balance(user_id, amount, game_type, result):
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} servers')
-    
+            
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s) globally")
-    except Exception as e:
-        print(f"Failed to sync commands globally: {e}")
-        
-        try:
             guild = discord.Object(id=SERVER_ID)
             synced = await bot.tree.sync(guild=guild)
             print(f"Synced {len(synced)} command(s) to guild {SERVER_ID}")
-        except Exception as e2:
+    except Exception as e2:
             print(f"Failed to sync commands to guild: {e2}")
 
 # Blackjack command
