@@ -343,31 +343,36 @@ async def giveaway(
 async def claim(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     user = get_user(uid)
+
     if user["balance"] >= 1000:
         return await interaction.response.send_message(
             f"❌ You can only claim if your balance is below 1000 dabloons.\n💰 Your balance: {user['balance']}",
             ephemeral=True
         )
+
     now = datetime.utcnow()
     last_claim_str = user.get("last_claim")
+
     if last_claim_str:
         last_claim = datetime.fromisoformat(last_claim_str)
-        remaining = (last_claim + timedelta(hours=24)) - now
+        remaining = (last_claim + timedelta(hours=1)) - now  # ✅ 1 HOUR COOLDOWN
         if remaining.total_seconds() > 0:
-            hours, remainder = divmod(int(remaining.total_seconds()), 3600)
-            minutes, seconds = divmod(remainder, 60)
+            minutes, seconds = divmod(int(remaining.total_seconds()), 60)
             return await interaction.response.send_message(
-                f"⏳ Already claimed! Come back in **{hours}h {minutes}m {seconds}s**.",
+                f"⏳ Already claimed! Come back in **{minutes}m {seconds}s**.",
                 ephemeral=True
             )
+
     reward = 1000
     user["balance"] += reward
     user["last_claim"] = now.isoformat()
     save_data()
+
     await interaction.response.send_message(
         f"🎉 You claimed **{reward} dabloons**!\n💰 Your new balance: {user['balance']}",
         ephemeral=True
     )
+
 
 # ---------- SYNC ----------
 @bot.tree.command(name="sync")
@@ -389,3 +394,4 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
