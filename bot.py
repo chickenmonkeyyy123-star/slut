@@ -404,6 +404,18 @@ async def clear(interaction: discord.Interaction):
         await bot.tree.delete_command(cmd.id, guild=guild)
     await interaction.response.send_message("✅ Cleared all guild commands.", ephemeral=True)
 
+@bot.tree.command(name="clear")
+async def clear(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Only admins can clear commands.", ephemeral=True)
+    
+    guild = discord.Object(id=GUILD_ID)
+    commands_list = await bot.tree.fetch_commands(guild=guild)
+    for cmd in commands_list:
+        await bot.tree.delete_command(cmd.id, guild=guild)
+    await interaction.response.send_message("✅ Cleared all guild commands.", ephemeral=True)
+
+
 # ---------- ON READY ----------
 @bot.event
 async def on_ready():
@@ -413,3 +425,4 @@ async def on_ready():
 
 # ---------- RUN BOT ----------
 bot.run(TOKEN)
+
