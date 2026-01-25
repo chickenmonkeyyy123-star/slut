@@ -191,13 +191,26 @@ class CoinflipChallengeView(View):
         self.choice = choice.lower()
         self.accepted = False
 
-    async def end_game(self, interaction, winner=None, result=None):
+        # Take money from both users immediately
+        u1 = get_user(self.challenger.id)
+        u2 = get_user(self.target.id)
+
+        if u1["balance"] < amount:
+            raise ValueError("Challenger does not have enough balance.")
+        if u2["balance"] < amount:
+            raise ValueError("Target does not have enough balance.")
+
+        u1["balance"] -= amount
+        u2["balance"] -= amount
+        save_data()
+
+    async def end_game(self, interaction, winner=None):
         u1 = get_user(self.challenger.id)
         u2 = get_user(self.target.id)
 
         if winner is None:  # declined or timeout
             u1["balance"] += self.amount
-            u2["balance"] += 0
+            u2["balance"] += self.amount
             await interaction.response.edit_message(content="Challenge not accepted in time.", view=None)
         else:
             if winner == self.challenger:
@@ -210,9 +223,12 @@ class CoinflipChallengeView(View):
                 u2["coinflip"]["wins"] += 1
                 u1["coinflip"]["losses"] += 1
                 msg = f"🪙 {self.target.mention} won the coinflip against {self.challenger.mention}! (+{self.amount})"
+
             await interaction.response.edit_message(content=msg, view=None)
+
         save_data()
         self.stop()
+
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
     async def accept(self, interaction: discord.Interaction, button: Button):
@@ -297,3 +313,4 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
