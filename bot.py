@@ -42,9 +42,9 @@ def get_user_data(user_id):
             "balance": 1000,
             "wins": 0,
             "losses": 0,
-            "last_claim": "1970-01-01T00:00:00",
-            "blackjack": None
+            "last_claim": "1970-01-01T00:00:00"
         }
+        save_data()
     return data[user_id_str]
 
 # Clear all previous commands and sync fresh commands to guild
@@ -55,14 +55,13 @@ async def reset_commands():
 
 # Blackjack game class with full rules
 class BlackjackGame:
-    def __init__(self, ctx, user_id, bet):
-        self.ctx = ctx
+    def __init__(self, interaction, user_id, bet):
+        self.interaction = interaction
         self.user_id = user_id
         self.bet = bet
         self.deck = self.create_deck()
         self.player_hands = [[]]  # support split
         self.dealer_hand = []
-        self.player_hands_total = [0]
         self.active_hand_index = 0
         self.game_over = False
         self.result = None
@@ -99,51 +98,49 @@ class BlackjackGame:
             aces -= 1
         return total
 
-    def start(self):
-        # Deal initial cards
-        for _ in range(2):
-            self.deal_card(self.player_hands[0])
-            self.deal_card(self.dealer_hand)
-        # Handle split if possible
-        if self.can_split():
-            self.split = True
-
-    def can_split(self):
-        # Check if first two cards are same rank for split
-        hand = self.player_hands[0]
-        return len(hand) == 2 and hand[0][0] == hand[1][0]
-
     def get_hand_str(self, hand, hide_dealer=False):
         if hide_dealer:
             return "?? " + ' '.join([f"{r}{s}" for r,s in hand[1:]])
         else:
             return ' '.join([f"{r}{s}" for r,s in hand])
 
-    async def play(self):
-        self.start()
+    async def start(self):
+        # Deal initial cards
+        self.deal_card(self.player_hands[0])
+        self.deal_card(self.player_hands[0])
+        self.deal_card(self.dealer_hand)
+        self.deal_card(self.dealer_hand)
         # Check for blackjack
         if self.hand_value(self.player_hands[0]) == 21:
             self.result = 'blackjack'
             await self.resolve()
             return
+        await self.player_turns()
 
-        # Player turn for each hand
+    async def player_turns(self):
         for idx in range(len(self.player_hands)):
             self.active_hand_index = idx
+            hand = self.player_hands[idx]
             while True:
-                hand = self.player_hands[idx]
                 total = self.hand_value(hand)
                 embed = discord.Embed(title="Blackjack", color=0x00ff00)
                 embed.add_field(name="Your Hand", value=self.get_hand_str(hand) + f" (Total: {total})")
                 embed.add_field(name="Dealer", value=self.get_hand_str(self.dealer_hand, hide_dealer=True))
-                embed.set_footer(text="React with ✅ Hit | 🛑 Stand | 🔄 Double | ❌ Surrender" )
-                msg = await self.ctx.send(embed=embed)
-
-                for emoji in ['✅', '🛑', '🔄', '❌']:
-                    await msg.add_reaction(emoji)
+                # Send message
+                if idx == 0:
+                    await self.interaction.response.send_message(embed=embed)
+                else:
+                    await self.interaction.followup.send(embed=embed)
+                message = await self.interaction.original_response() if idx == 0 else None
+                if message is None:
+                    message = await self.interaction.followup.send(embed=embed)
+                await message.add_reaction('✅')  # Hit
+                await message.add_reaction('🛑')  # Stand
+                await message.add_reaction('🔄')  # Double
+                await message.add_reaction('❌')  # Surrender
 
                 def check(reaction, user):
-                    return user.id == self.user_id and str(reaction.emoji) in ['✅', '🛑', '🔄', '❌'] and reaction.message.id == msg.id
+                    return user.id == self.user_id and str(reaction.emoji) in ['✅', '🛑', '🔄', '❌'] and reaction.message.id == message.id
 
                 try:
                     reaction, user = await bot.wait_for('reaction_add', timeout=60.0, check=check)
@@ -153,11 +150,10 @@ class BlackjackGame:
 
                 emoji = str(reaction.emoji)
                 if emoji == '✅':
-                    # Hit
                     self.deal_card(hand)
                     total = self.hand_value(hand)
                     if total > 21:
-                        await self.ctx.send(f"Bust! Your hand: {self.get_hand_str(hand)} Total: {total}")
+                        await self.interaction.followup.send(f"Bust! Your hand: {self.get_hand_str(hand)} Total: {total}")
                         break
                 elif emoji == '🛑':
                     # Stand
@@ -171,10 +167,10 @@ class BlackjackGame:
                         self.deal_card(hand)
                         total = self.hand_value(hand)
                         if total > 21:
-                            await self.ctx.send(f"Bust after double! Your hand: {self.get_hand_str(hand)} Total: {total}")
+                            await self.interaction.followup.send(f"Bust after double! Your hand: {self.get_hand_str(hand)} Total: {total}")
                         break
                     else:
-                        await self.ctx.send("Not enough dabloons to double.")
+                        await self.interaction.followup.send("Not enough dabloons to double.")
                 elif emoji == '❌':
                     # Surrender
                     user_data = get_user_data(self.user_id)
@@ -192,15 +188,14 @@ class BlackjackGame:
             self.deal_card(self.dealer_hand)
 
     async def resolve(self):
-        # Final reveal
         dealer_total = self.hand_value(self.dealer_hand)
-        results = []
+        user_data = get_user_data(self.user_id)
+        # Apply outcomes for each hand
         for hand in self.player_hands:
             total = self.hand_value(hand)
-            user_data = get_user_data(self.user_id)
             if self.result == 'surrender':
                 # Already handled
-                break
+                continue
             if total > 21:
                 # Bust
                 user_data['losses'] += 1
@@ -218,12 +213,11 @@ class BlackjackGame:
         save_data()
         # Show final hands
         embed = discord.Embed(title="Final Results", color=0x00ff00)
-        embed.add_field(name="Your Hand(s)", value='')
         for idx, hand in enumerate(self.player_hands):
             total = self.hand_value(hand)
             embed.add_field(name=f"Hand {idx+1}", value=f"{self.get_hand_str(hand)} (Total: {total})", inline=False)
         embed.add_field(name="Dealer", value=self.get_hand_str(self.dealer_hand))
-        await self.ctx.send(embed=embed)
+        await self.interaction.followup.send(embed=embed)
 
 # Commands
 
@@ -232,7 +226,6 @@ async def on_ready():
     print(f'Logged in as {bot.user}')
     await reset_commands()
 
-# /bj command
 @bot.tree.command(name='bj', description='Start a blackjack game')
 async def bj(interaction: discord.Interaction, amount: int):
     user_id = interaction.user.id
@@ -246,12 +239,14 @@ async def bj(interaction: discord.Interaction, amount: int):
     # Deduct bet
     user_data['balance'] -= amount
     save_data()
+
     await interaction.response.send_message(f"{interaction.user.mention} has started a blackjack with {amount} dabloons.", ephemeral=False)
+
+    # Start game
     game = BlackjackGame(interaction, user_id, amount)
-    await game.play()
+    await game.start()
     save_data()
 
-# /cf command
 @bot.tree.command(name='cf', description='Coin flip')
 async def cf(interaction: discord.Interaction, amount: int, choice: str, opponent: discord.Member = None):
     user_id = interaction.user.id
@@ -272,13 +267,12 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str, opponen
     if opponent:
         # Send challenge
         challenge_msg = await interaction.response.send_message(f"{opponent.mention}, {interaction.user.mention} challenges you to a coin flip for {amount} dabloons! React with ✅ to accept or ❌ to decline within 60 seconds.", ephemeral=False)
-        # Add reactions
-        challenge_msg = await interaction.original_response()
-        await challenge_msg.add_reaction('✅')
-        await challenge_msg.add_reaction('❌')
+        challenge_msg_obj = await interaction.original_response()
+        await challenge_msg_obj.add_reaction('✅')
+        await challenge_msg_obj.add_reaction('❌')
 
         def check(reaction, user):
-            return user.id == opponent.id and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == challenge_msg.id
+            return user.id == opponent.id and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == challenge_msg_obj.id
 
         try:
             reaction, user = await bot.wait_for('reaction_add', timeout=60.0, check=check)
@@ -323,8 +317,7 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str, opponen
             await interaction.response.send_message("You lost the coin flip.")
         save_data()
 
-# /lb command
-@bot.tree.command(name='lb', description='Leaderboard')
+@bot.tree.command(name='lb', description='Show leaderboard')
 async def lb(interaction: discord.Interaction):
     sorted_users = sorted(data.items(), key=lambda x: x[1]['balance'], reverse=True)
     embed = discord.Embed(title="Leaderboard", color=0x00ff00)
@@ -333,7 +326,6 @@ async def lb(interaction: discord.Interaction):
         embed.add_field(name=f"{idx}. {user.name}", value=f"Balance: {info['balance']} | Wins: {info['wins']} | Losses: {info['losses']}", inline=False)
     await interaction.response.send_message(embed=embed)
 
-# /claim command
 @bot.tree.command(name='claim', description='Claim 1000 dabloons (1-hour cooldown)')
 async def claim(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -352,14 +344,13 @@ async def claim(interaction: discord.Interaction):
     save_data()
     await interaction.response.send_message("You claimed 1000 dabloons!", ephemeral=True)
 
-# /giveaway command
 @bot.tree.command(name='giveaway', description='Start a giveaway')
 @commands.has_permissions(administrator=True)
 async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
     if amount <= 0 or duration <= 0 or winners <= 0:
         await interaction.response.send_message("All values must be positive.", ephemeral=True)
         return
-    # Collect participants
+    # Send giveaway message
     message = await interaction.response.send_message(f"React with 🎉 to enter a giveaway of {amount} dabloons! Duration: {duration} seconds. Winners: {winners}", fetch_response=True)
     msg = await message
     await msg.add_reaction('🎉')
@@ -400,4 +391,5 @@ async def on_ready():
     await reset_commands()
     periodic_save.start()
 
+# Run bot
 bot.run(TOKEN)
