@@ -244,7 +244,11 @@ async def giveaway(interaction: discord.Interaction, amount: int, duration: int,
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
-    print(f"Logged in as {bot.user}")
+    guild = discord.Object(id=1332118870181412936)  # YOUR SERVER ID
+    bot.tree.copy_global_to(guild=guild)
+    await bot.tree.sync(guild=guild)
+    print(f"✅ Synced commands to guild {guild.id}")
+    print(f"🤖 Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
