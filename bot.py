@@ -7,7 +7,6 @@ import json
 import os
 from dotenv import load_dotenv
 import asyncio
-from datetime import datetime, timedelta
 
 # ---------- LOAD .ENV ----------
 load_dotenv()
@@ -18,13 +17,13 @@ if not TOKEN:
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
 START_BALANCE = 1000
-GUILD_ID = 1332118870181412936
+GUILD_ID = 1332118870181412936  # Replace with your guild ID
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------- DATA ----------
+# ---------- DATA HANDLING ----------
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
@@ -54,10 +53,9 @@ def total_wl(u):
         u["blackjack"]["losses"] + u["coinflip"]["losses"],
     )
 
-# ---------- BLACKJACK ----------
+# ---------- BLACKJACK LOGIC ----------
 class BlackjackGame:
     def __init__(self, bet):
-        self.base_bet = bet
         self.deck = self.new_deck()
         random.shuffle(self.deck)
 
@@ -76,7 +74,7 @@ class BlackjackGame:
             for r in ranks:
                 v = 11 if r == "A" else 10 if r in ["J","Q","K"] else int(r)
                 deck.append({"r": r, "s": s, "v": v})
-        return deck
+        return deck * 6  # Optional: 6-deck shoe
 
     def value(self, hand):
         total = sum(c["v"] for c in hand)
@@ -94,6 +92,21 @@ class BlackjackGame:
     def stand(self):
         self.finished[self.active_hand] = True
 
+    def double(self):
+        self.bets[self.active_hand] *= 2
+        self.hit()
+        self.finished[self.active_hand] = True
+
+    def split(self):
+        hand = self.hands[self.active_hand]
+        if len(hand) == 2 and hand[0]["r"] == hand[1]["r"]:
+            self.hands[self.active_hand] = [hand[0]]
+            self.hands.insert(self.active_hand + 1, [hand[1]])
+            self.bets.insert(self.active_hand + 1, self.bets[self.active_hand])
+            self.finished.insert(self.active_hand + 1, False)
+            return True
+        return False
+
     def next_hand(self):
         while self.active_hand < len(self.hands) and self.finished[self.active_hand]:
             self.active_hand += 1
@@ -105,9 +118,10 @@ class BlackjackGame:
     def fmt(self, hand):
         return ", ".join(f"{c['r']}{c['s']}" for c in hand)
 
+# ---------- BLACKJACK VIEW ----------
 class BlackjackView(View):
     def __init__(self, game, user):
-        super().__init__(timeout=90)
+        super().__init__(timeout=120)
         self.game = game
         self.user = user
 
@@ -118,7 +132,7 @@ class BlackjackView(View):
             desc += f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} ({self.game.value(hand)}) | Bet: {self.game.bets[i]}\n"
 
         dealer = (
-            "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
+            f"?, {self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
             if hide_dealer else self.game.fmt(self.game.dealer)
         )
 
@@ -137,48 +151,67 @@ class BlackjackView(View):
 
     async def end_game(self, interaction):
         self.game.dealer_play()
-        dv = self.game.value(self.game.dealer)
+        dealer_val = self.game.value(self.game.dealer)
         u = get_user(self.user.id)
 
         embed = self.embed(hide_dealer=False)
         result = ""
 
         for i, hand in enumerate(self.game.hands):
-            pv = self.game.value(hand)
+            val = self.game.value(hand)
             bet = self.game.bets[i]
 
-            if pv > 21:
+            if val > 21:
                 u["blackjack"]["losses"] += 1
                 result += f"❌ Hand {i+1} busted\n"
-            elif dv > 21 or pv > dv:
+            elif dealer_val > 21 or val > dealer_val:
                 u["balance"] += bet * 2
                 u["blackjack"]["wins"] += 1
                 result += f"✅ Hand {i+1} wins (+{bet})\n"
-            elif pv < dv:
+            elif val < dealer_val:
                 u["blackjack"]["losses"] += 1
                 result += f"❌ Hand {i+1} loses\n"
             else:
                 u["balance"] += bet
                 result += f"➖ Hand {i+1} push (bet returned)\n"
 
-        embed.description += "\n" + result
         save_data()
         self.stop()
         await interaction.response.edit_message(embed=embed, view=None)
 
+    def check_user(self, interaction):
+        if interaction.user.id != self.user.id:
+            return False
+        return True
+
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
     async def hit(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
+        if not self.check_user(interaction):
             return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.hit()
         await self.advance(interaction)
 
     @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
     async def stand(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
+        if not self.check_user(interaction):
             return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.stand()
         await self.advance(interaction)
+
+    @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
+    async def double(self, interaction: discord.Interaction, button: Button):
+        if not self.check_user(interaction):
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
+        self.game.double()
+        await self.advance(interaction)
+
+    @discord.ui.button(label="Split", style=discord.ButtonStyle.gray)
+    async def split(self, interaction: discord.Interaction, button: Button):
+        if not self.check_user(interaction):
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
+        if not self.game.split():
+            return await interaction.response.send_message("Cannot split this hand.", ephemeral=True)
+        await interaction.response.edit_message(embed=self.embed(), view=self)
 
 # ---------- COMMANDS ----------
 @bot.tree.command(name="bj")
@@ -187,7 +220,6 @@ async def bj(interaction: discord.Interaction, amount: int):
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
 
-    # TAKE MONEY IMMEDIATELY
     u["balance"] -= amount
     save_data()
 
@@ -205,10 +237,9 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str):
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
 
-    # TAKE MONEY IMMEDIATELY
     u["balance"] -= amount
-
     result = random.choice(["heads", "tails"])
+
     if result == choice:
         u["balance"] += amount * 2
         u["coinflip"]["wins"] += 1
@@ -230,13 +261,16 @@ async def leaderboard(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 Leaderboard", description="\n".join(lines))
     await interaction.response.send_message(embed=embed)
 
-# ---------- SYNC ----------
+# Optional: manual sync command
+@bot.tree.command(name="sync")
+async def sync_commands(interaction: discord.Interaction):
+    await bot.tree.sync()
+    await interaction.response.send_message("Commands synced!", ephemeral=True)
+
+# ---------- READY ----------
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    bot.tree.clear_commands(guild=guild)
-    bot.tree.copy_global_to(guild=guild)
-    await bot.tree.sync(guild=guild)
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
