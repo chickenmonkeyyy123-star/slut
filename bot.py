@@ -1,202 +1,224 @@
-import os
 import discord
-from discord.ext import commands
-from dotenv import load_dotenv
-import asyncio
 import json
 import random
+import asyncio
+import os
+from discord.ext import commands
+from discord import app_commands
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
-TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-if not TOKEN:
-    raise ValueError("DISCORD_BOT_TOKEN not set in .env file!")
+TOKEN = os.getenv('DISCORD_TOKEN')
+SERVER_ID = 1332118870181412936
 
+# Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-DATA_FILE = 'dabloon_data.json'
+# Card deck setup
+SUITS = ['♠', '♥', '♦', '♣']
+RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+VALUES = {rank: i+2 for i, rank in enumerate(RANKS[:-1])}
+VALUES['J'] = 10
+VALUES['Q'] = 10
+VALUES['K'] = 10
+VALUES['A'] = 11
 
-# Utility functions to load/save balances
-def load_balances():
+# Admin IDs (replace with your Discord user ID)
+ADMIN_IDS = ["1081808039872573544"]  # Add your admin ID here
+
+# Active games storage
+blackjack_games = {}
+coinflip_games = {}
+giveaway_games = {}
+
+# Load user data
+def load_data():
     try:
-        with open(DATA_FILE, 'r') as f:
-            data = json.load(f)
-        balances = {}
-        for user_id_str, user_data in data.items():
-            if isinstance(user_data, dict) and "balance" in user_data:
-                balances[user_id_str] = user_data["balance"]
-        return balances
-    except FileNotFoundError:
+        with open('dabloon_data.json', 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-def save_balance(user_id, amount):
-    try:
-        with open(DATA_FILE, 'r') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        data = {}
-    user_id_str = str(user_id)
-    if user_id_str not in data or not isinstance(data[user_id_str], dict):
-        data[user_id_str] = {}
-    data[user_id_str]["balance"] = amount
-    with open(DATA_FILE, 'w') as f:
+# Save user data
+def save_data(data):
+    with open('dabloon_data.json', 'w') as f:
         json.dump(data, f, indent=4)
 
-def update_balance(user_id, delta):
-    try:
-        with open(DATA_FILE, 'r') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        data = {}
-    user_id_str = str(user_id)
-    if user_id_str not in data or not isinstance(data[user_id_str], dict):
-        data[user_id_str] = {}
-    current = data[user_id_str].get("balance", 0)
-    new_balance = current + delta
-    data[user_id_str]["balance"] = new_balance
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
-    return new_balance
+# Create a deck of cards
+def create_deck():
+    return [{'rank': rank, 'suit': suit} for suit in SUITS for rank in RANKS]
 
-# Blackjack game implementation
-# Card deck
-cards = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11]  # 10s for face cards, 11 for Ace
-
-def deal_card():
-    return random.choice(cards)
-
-def calculate_score(hand):
-    total = sum(hand)
-    aces = hand.count(11)
-    while total > 21 and aces:
-        total -= 10
+# Calculate hand value
+def hand_value(hand):
+    value = sum(VALUES[card['rank']] for card in hand)
+    aces = sum(1 for card in hand if card['rank'] == 'A')
+    
+    while value > 21 and aces:
+        value -= 10
         aces -= 1
-    return total
+    
+    return value
 
-async def blackjack_game(interaction, amount):
-    user_id = interaction.user.id
-    balance = get_balance(user_id)
-    if amount > balance:
-        await interaction.response.send_message("You don't have enough dabloons.", ephemeral=True)
-        return
+# Format hand for display
+def format_hand(hand):
+    return ' '.join(f"{card['rank']}{card['suit']}" for card in hand)
 
-    # Initial deal
-    player_hand = [deal_card(), deal_card()]
-    dealer_hand = [deal_card(), deal_card()]
+# Check if user has enough balance
+def check_balance(user_id, amount):
+    data = load_data()
+    user_id_str = str(user_id)
+    
+    if user_id_str not in data:
+        data[user_id_str] = {
+            "balance": 10000,
+            "blackjack": {"wins": 0, "losses": 0},
+            "coinflip": {"wins": 0, "losses": 0}
+        }
+        save_data(data)
+    
+    return data[user_id_str]["balance"] >= amount
 
-    # Check for blackjack
-    player_score = calculate_score(player_hand)
-    dealer_score = calculate_score(dealer_hand)
+# Update user balance
+def update_balance(user_id, amount, game_type, result):
+    data = load_data()
+    user_id_str = str(user_id)
+    
+    if user_id_str not in data:
+        data[user_id_str] = {
+            "balance": 10000,
+            "blackjack": {"wins": 0, "losses": 0},
+            "coinflip": {"wins": 0, "losses": 0}
+        }
+    
+    data[user_id_str]["balance"] += amount
+    
+    if game_type == "blackjack":
+        if result == "win":
+            data[user_id_str]["blackjack"]["wins"] += 1
+        elif result == "loss":
+            data[user_id_str]["blackjack"]["losses"] += 1
+    elif game_type == "coinflip":
+        if result == "win":
+            data[user_id_str]["coinflip"]["wins"] += 1
+        elif result == "loss":
+            data[user_id_str]["coinflip"]["losses"] += 1
+    
+    save_data(data)
+    return data[user_id_str]["balance"]
 
-    # Check for immediate blackjack
-    if player_score == 21:
-        # Player gets 1.5x payout
-        update_balance(user_id, amount * 1.5)
-        await interaction.response.send_message(f"Blackjack! You win 1.5x your bet!", ephemeral=True)
-        return
-
-    # Game loop
-    def format_hand(hand):
-        return ", ".join(str(card) for card in hand)
-
-    # Player turn
-    while True:
-        embed = discord.Embed(title="Blackjack", description=f"Your Hand: {format_hand(player_hand)} (Score: {calculate_score(player_hand)})\nDealer shows: {dealer_hand[0]}")
-        embed.set_footer(text="Type hit, stand, double, or split (if applicable).")
-        await interaction.response.send_message(embed=embed, view=None, ephemeral=True)
-
-        # Present options
-        class BlackjackView(discord.ui.View):
-            def __init__(self):
-                super().__init__(timeout=60)
-            @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary)
-            async def hit(self, button, interaction2):
-                if interaction2.user.id != user_id:
-                    return
-                player_hand.append(deal_card())
-                score = calculate_score(player_hand)
-                if score > 21:
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Bust!", description=f"Your hand: {format_hand(player_hand)} (Score: {score})\nYou lose!"), view=None)
-                    update_balance(user_id, -amount)
-                    self.stop()
-                else:
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Blackjack", description=f"Your Hand: {format_hand(player_hand)} (Score: {score})\nDealer shows: {dealer_hand[0]}"), view=self)
-            @discord.ui.button(label="Stand", style=discord.ButtonStyle.secondary)
-            async def stand(self, button, interaction2):
-                if interaction2.user.id != user_id:
-                    return
-                # Dealer turn
-                dealer_score = calculate_score(dealer_hand)
-                while dealer_score < 17:
-                    dealer_hand.append(deal_card())
-                    dealer_score = calculate_score(dealer_hand)
-                player_score = calculate_score(player_hand)
-                # Determine result
-                if dealer_score > 21 or player_score > dealer_score:
-                    # Player wins
-                    update_balance(user_id, amount)
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Win!", description=f"Your hand: {format_hand(player_hand)} (Score: {player_score})\nDealer: {format_hand(dealer_hand)} (Score: {dealer_score})\nYou win!"), view=None)
-                elif player_score == dealer_score:
-                    # Push
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Push", description=f"Your hand: {format_hand(player_hand)}\nDealer: {format_hand(dealer_hand)}\nIt's a tie!"), view=None)
-                else:
-                    # Dealer wins
-                    update_balance(user_id, -amount)
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Lose!", description=f"Your hand: {format_hand(player_hand)}\nDealer: {format_hand(dealer_hand)}\nYou lose!"), view=None)
-                self.stop()
-            @discord.ui.button(label="Double", style=discord.ButtonStyle.danger)
-            async def double(self, button, interaction2):
-                if interaction2.user.id != user_id:
-                    return
-                # Double the bet
-                if amount > get_balance(user_id):
-                    await interaction2.response.send_message("Not enough balance to double.", ephemeral=True)
-                    return
-                update_balance(user_id, -amount)
-                new_amount = amount * 2
-                player_hand.append(deal_card())
-                score = calculate_score(player_hand)
-                # Dealer turn
-                dealer_score = calculate_score(dealer_hand)
-                while dealer_score < 17:
-                    dealer_hand.append(deal_card())
-                    dealer_score = calculate_score(dealer_hand)
-                # Determine result
-                if score > 21:
-                    # Bust
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Bust!", description=f"Your hand: {format_hand(player_hand)} (Score: {score})\nYou lose!"), view=None)
-                    update_balance(user_id, -amount)
-                elif dealer_score > 21 or score > dealer_score:
-                    update_balance(user_id, new_amount)
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Win!", description=f"Your hand: {format_hand(player_hand)} (Score: {score})\nDealer: {format_hand(dealer_hand)} (Score: {dealer_score})\nYou win double!"), view=None)
-                elif score == dealer_score:
-                    # Push
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Push", description=f"Your hand: {format_hand(player_hand)}\nDealer: {format_hand(dealer_hand)}\nIt's a tie!"), view=None)
-                else:
-                    await interaction2.response.edit_message(embed=discord.Embed(title="Lose!", description=f"Your hand: {format_hand(player_hand)}\nDealer: {format_hand(dealer_hand)}\nYou lose!"), view=None)
-                    update_balance(user_id, -amount)
-                self.stop()
-        view = BlackjackView()
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        await view.wait()
-        return
-
-# Command to start blackjack
-@bot.tree.command(name="bj", description="Play blackjack")
-async def start_blackjack(interaction: discord.Interaction, amount: float):
-    await blackjack_game(interaction, amount)
-
-# Run the bot
+# Bot ready event
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
-    await bot.tree.sync()
+    print(f'{bot.user.name} has connected to Discord!')
+    print(f'Bot is in {len(bot.guilds)} servers')
+    
+    # Sync commands with the server
+    try:
+        synced = await bot.tree.sync(guild=discord.Object(id=SERVER_ID))
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
-# Helper to get balance
-def get_balance(user_id):
-    data = load_balances()
-    return data.get(str(user_id), 0)
+# Blackjack command
+@bot.tree.command(name="bj", description="Play blackjack against the AI")
+@app_commands.describe(amount="The amount of dabloons to bet")
+async def blackjack(interaction: discord.Interaction, amount: float):
+    user_id = str(interaction.user.id)
+    
+    # Check if user has enough balance
+    if not check_balance(user_id, amount):
+        await interaction.response.send_message(f"You don't have enough dabloons to bet {amount}!")
+        return
+    
+    # Check if user is already in a game
+    if user_id in blackjack_games:
+        await interaction.response.send_message("You're already in a blackjack game! Use the buttons to continue.")
+        return
+    
+    # Create a new game
+    deck = create_deck()
+    random.shuffle(deck)
+    
+    player_hand = [deck.pop(), deck.pop()]
+    dealer_hand = [deck.pop(), deck.pop()]
+    
+    # Check for blackjack
+    player_value = hand_value(player_hand)
+    dealer_value = hand_value(dealer_hand)
+    
+    if player_value == 21 and dealer_value == 21:
+        # Both have blackjack, it's a push
+        await interaction.response.send_message(f"**Blackjack Push!**\n\nYour hand: {format_hand(player_hand)} (21)\nDealer's hand: {format_hand(dealer_hand)} (21)\n\nYour bet of {amount} dabloons has been returned.")
+        return
+    elif player_value == 21:
+        # Player has blackjack, win
+        new_balance = update_balance(user_id, amount * 1.5, "blackjack", "win")
+        await interaction.response.send_message(f"**Blackjack! You win!**\n\nYour hand: {format_hand(player_hand)} (21)\nDealer's hand: {format_hand(dealer_hand)} ({dealer_value})\n\nYou won {amount * 1.5} dabloons! Your new balance is {new_balance}.")
+        return
+    elif dealer_value == 21:
+        # Dealer has blackjack, player loses
+        update_balance(user_id, -amount, "blackjack", "loss")
+        await interaction.response.send_message(f"**Dealer has Blackjack! You lose!**\n\nYour hand: {format_hand(player_hand)} ({player_value})\nDealer's hand: {format_hand(dealer_hand)} (21)\n\nYou lost {amount} dabloons.")
+        return
+    
+    # Create buttons
+    view = BlackjackView(user_id, amount, player_hand, dealer_hand, deck)
+    
+    # Send initial game state
+    await interaction.response.send_message(
+        f"**Blackjack**\n\nYour hand: {format_hand(player_hand)} ({player_value})\nDealer's hand: {dealer_hand[0]['rank']}{dealer_hand[0]['suit']} ?\n\nBet: {amount} dabloons",
+        view=view
+    )
+    
+    # Store game state
+    blackjack_games[user_id] = {
+        "deck": deck,
+        "player_hand": player_hand,
+        "dealer_hand": dealer_hand,
+        "bet": amount,
+        "doubled_down": False,
+        "split": False,
+        "message": None
+    }
 
-# Run
-bot.run(TOKEN)
+# Blackjack view with buttons
+class BlackjackView(discord.ui.View):
+    def __init__(self, user_id, bet, player_hand, dealer_hand, deck):
+        super().__init__(timeout=60)  # 60 second timeout
+        self.user_id = user_id
+        self.bet = bet
+        self.player_hand = player_hand
+        self.dealer_hand = dealer_hand
+        self.deck = deck
+        self.doubled_down = False
+        
+        # Disable split button if cards are not the same rank
+        if player_hand[0]['rank'] != player_hand[1]['rank']:
+            self.children[3].disabled = True
+    
+    async def on_timeout(self):
+        # End the game if no action is taken
+        if self.user_id in blackjack_games:
+            update_balance(self.user_id, -self.bet, "blackjack", "loss")
+            await self.message.edit(content=f"**Game timed out! You lose!**\n\nYou lost {self.bet} dabloons.", view=None)
+            del blackjack_games[self.user_id]
+    
+    @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary)
+    async def hit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("This is not your game!", ephemeral=True)
+            return
+        
+        # Draw a card
+        self.player_hand.append(self.deck.pop())
+        player_value = hand_value(self.player_hand)
+        
+        # Check for bust
+        if player_value > 21:
+            update_balance(self.user_id, -self.bet, "blackjack", "loss")
+            dealer_value = hand_value(self.dealer_hand)
+            await interaction.response
