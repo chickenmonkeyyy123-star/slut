@@ -248,10 +248,11 @@ async def cf(
     interaction: discord.Interaction,
     amount: int,
     choice: str,
-    user: discord.User | None = None
+    user: discord.User | None = None  # ✅ optional user fixed
 ):
     choice = choice.lower()
     u = get_user(interaction.user.id)
+
     if choice not in ["heads", "tails"]:
         return await interaction.response.send_message("heads or tails only.", ephemeral=True)
     if amount <= 0 or amount > u["balance"]:
@@ -259,8 +260,8 @@ async def cf(
     if user and user.id == interaction.user.id:
         return await interaction.response.send_message("You can't coinflip yourself.", ephemeral=True)
 
-    # AI coinflip
-    if not user:
+    # AI coinflip if no user
+    if user is None:
         result = random.choice(["heads", "tails"])
         if result == choice:
             u["balance"] += amount
@@ -280,6 +281,8 @@ async def cf(
             f"{user.mention} doesn't have enough balance.",
             ephemeral=True
         )
+
+    # Make sure view exists for PvP coinflip (you didn't paste CoinflipView code)
     view = CoinflipView(interaction.user, user, amount, choice)
     await interaction.response.send_message(
         f"🪙 **Coinflip Challenge**\n"
@@ -431,4 +434,5 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
 
