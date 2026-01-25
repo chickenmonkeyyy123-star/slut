@@ -47,11 +47,6 @@ def get_user(uid):
             "coinflip": {"wins": 0, "losses": 0},
         }
         save_data()
-    else:
-        # auto-migrate older users
-        if "bank" not in data[uid]:
-            data[uid]["bank"] = 0
-            save_data()
     return data[uid]
 
 def total_wl(u):
@@ -70,9 +65,7 @@ class BlackjackGame:
         self.hands = [[self.deck.pop(), self.deck.pop()]]
         self.bets = [bet]
         self.finished = [False]
-        self.doubled = [False]
         self.active_hand = 0
-
         self.dealer = [self.deck.pop(), self.deck.pop()]
 
     def new_deck(self):
@@ -93,19 +86,6 @@ class BlackjackGame:
             aces -= 1
         return total
 
-    def can_split(self):
-        hand = self.hands[self.active_hand]
-        return len(hand) == 2 and hand[0]["r"] == hand[1]["r"]
-
-    def split(self):
-        h = self.hands[self.active_hand]
-        c1, c2 = h
-        self.hands[self.active_hand] = [c1, self.deck.pop()]
-        self.hands.insert(self.active_hand + 1, [c2, self.deck.pop()])
-        self.bets.insert(self.active_hand + 1, self.base_bet)
-        self.finished.insert(self.active_hand + 1, False)
-        self.doubled.insert(self.active_hand + 1, False)
-
     def hit(self):
         hand = self.hands[self.active_hand]
         hand.append(self.deck.pop())
@@ -113,12 +93,6 @@ class BlackjackGame:
             self.finished[self.active_hand] = True
 
     def stand(self):
-        self.finished[self.active_hand] = True
-
-    def double(self):
-        self.bets[self.active_hand] *= 2
-        self.doubled[self.active_hand] = True
-        self.hit()
         self.finished[self.active_hand] = True
 
     def next_hand(self):
@@ -142,16 +116,9 @@ class BlackjackView(View):
         desc = ""
         for i, hand in enumerate(self.game.hands):
             pointer = "➡️ " if i == self.game.active_hand else ""
-            desc += (
-                f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} "
-                f"(Value: {self.game.value(hand)}) | Bet: {self.game.bets[i]}\n"
-            )
+            desc += f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} ({self.game.value(hand)}) | Bet {self.game.bets[i]}\n"
 
-        dealer = (
-            "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
-            if hide_dealer else self.game.fmt(self.game.dealer)
-        )
-
+        dealer = "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}" if hide_dealer else self.game.fmt(self.game.dealer)
         return discord.Embed(
             title="🃏 Blackjack",
             description=f"{desc}\n**Dealer:** {dealer}",
@@ -211,45 +178,12 @@ class BlackjackView(View):
         self.game.stand()
         await self.advance(interaction)
 
-    @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
-    async def double(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("Not your game.", ephemeral=True)
-        u = get_user(self.user.id)
-        bet = self.game.bets[self.game.active_hand]
-        if u["balance"] < bet:
-            return await interaction.response.send_message("Not enough balance to double.", ephemeral=True)
-        self.game.double()
-        await self.advance(interaction)
-
-    @discord.ui.button(label="Split", style=discord.ButtonStyle.gray)
-    async def split(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("Not your game.", ephemeral=True)
-        if not self.game.can_split():
-            return await interaction.response.send_message("You can't split this hand.", ephemeral=True)
-        u = get_user(self.user.id)
-        if u["balance"] < self.game.base_bet:
-            return await interaction.response.send_message("Not enough balance to split.", ephemeral=True)
-        self.game.split()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
-
-# ---------- COMMANDS ----------
-@bot.tree.command(name="bj")
-async def bj(interaction: discord.Interaction, amount: int):
-    u = get_user(interaction.user.id)
-    if amount <= 0 or amount > u["balance"]:
-        return await interaction.response.send_message("Invalid bet.", ephemeral=True)
-    game = BlackjackGame(amount)
-    view = BlackjackView(game, interaction.user)
-    await interaction.response.send_message(embed=view.embed(), view=view)
-
-# ---------- BANKING ----------
+# ---------- BANK COMMANDS ----------
 @bot.tree.command(name="atm")
 async def atm(interaction: discord.Interaction):
     u = get_user(interaction.user.id)
     await interaction.response.send_message(
-        f"🏦 **Your Bank Account**\n💰 Bank Balance: **{u['bank']} dabloons**",
+        f"🏦 **Bank Balance:** {u['bank']} dabloons",
         ephemeral=True
     )
 
@@ -262,7 +196,7 @@ async def deposit(interaction: discord.Interaction, amount: int):
     u["bank"] += amount
     save_data()
     await interaction.response.send_message(
-        f"🏦 Deposited **{amount} dabloons**\n💼 Wallet: {u['balance']} | Bank: {u['bank']}",
+        f"🏦 Deposited **{amount}** dabloons.\nBank: {u['bank']}",
         ephemeral=True
     )
 
@@ -270,32 +204,58 @@ async def deposit(interaction: discord.Interaction, amount: int):
 async def withdraw(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
     if amount <= 0 or amount > u["bank"]:
-        return await interaction.response.send_message("Invalid withdrawal amount.", ephemeral=True)
+        return await interaction.response.send_message("Invalid withdraw amount.", ephemeral=True)
     u["bank"] -= amount
     u["balance"] += amount
     save_data()
     await interaction.response.send_message(
-        f"🏦 Withdrew **{amount} dabloons**\n💼 Wallet: {u['balance']} | Bank: {u['bank']}",
+        f"💰 Withdrew **{amount}** dabloons.\nWallet: {u['balance']}",
         ephemeral=True
+    )
+
+# ---------- BASIC COMMANDS ----------
+@bot.tree.command(name="bj")
+async def bj(interaction: discord.Interaction, amount: int):
+    u = get_user(interaction.user.id)
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message("Invalid bet.", ephemeral=True)
+    game = BlackjackGame(amount)
+    view = BlackjackView(game, interaction.user)
+    await interaction.response.send_message(embed=view.embed(), view=view)
+
+@bot.tree.command(name="leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
+    lines = []
+    for i, (uid, u) in enumerate(sorted_users[:10], start=1):
+        w, l = total_wl(u)
+        lines.append(f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏦 {u['bank']} | 🏆 {w}W ❌ {l}L")
+    await interaction.response.send_message(
+        embed=discord.Embed(
+            title="🏆 Leaderboard",
+            description="\n".join(lines),
+            color=discord.Color.gold()
+        )
     )
 
 # ---------- SYNC ----------
 @bot.tree.command(name="sync")
 async def sync(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message(
-            "❌ Only server admins can sync commands.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("Admins only.", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
     guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
-    await interaction.response.send_message("✅ Commands fully resynced.", ephemeral=True)
+    await interaction.followup.send("✅ Commands synced.")
 
 # ---------- READY ----------
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
     await bot.tree.sync(guild=guild)
-    print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
+    print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
