@@ -1,221 +1,250 @@
 import discord
-import json
-import random
-import asyncio
-import os
 from discord.ext import commands
 from discord import app_commands
+from discord.ui import View, Button
+import random, json, os, asyncio
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
-SERVER_ID = 1332118870181412936
+TOKEN = os.getenv("DISCORD_TOKEN")
+DATA_FILE = "dabloon_data.json"
 
-# Bot setup
 intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix='/', intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Card deck setup
-SUITS = ['♠', '♥', '♦', '♣']
-RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
-VALUES = {rank: i+2 for i, rank in enumerate(RANKS[:-1])}
-VALUES['J'] = 10
-VALUES['Q'] = 10
-VALUES['K'] = 10
-VALUES['A'] = 11
+# ------------------ DATA HELPERS ------------------
 
-# Admin IDs (replace with your Discord user ID)
-ADMIN_IDS = ["1081808039872573544"]  # Add your admin ID here
-
-# Active games storage
-blackjack_games = {}
-coinflip_games = {}
-giveaway_games = {}
-
-# Load user data
 def load_data():
-    try:
-        with open('dabloon_data.json', 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    if not os.path.exists(DATA_FILE):
         return {}
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-# Save user data
 def save_data(data):
-    with open('dabloon_data.json', 'w') as f:
-        json.dump(data, f, indent=4)
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
-# Create a deck of cards
-def create_deck():
-    return [{'rank': rank, 'suit': suit} for suit in SUITS for rank in RANKS]
-
-# Calculate hand value
-def hand_value(hand):
-    value = sum(VALUES[card['rank']] for card in hand)
-    aces = sum(1 for card in hand if card['rank'] == 'A')
-    
-    while value > 21 and aces:
-        value -= 10
-        aces -= 1
-    
-    return value
-
-# Format hand for display
-def format_hand(hand):
-    return ' '.join(f"{card['rank']}{card['suit']}" for card in hand)
-
-# Check if user has enough balance
-def check_balance(user_id, amount):
-    data = load_data()
-    user_id_str = str(user_id)
-    
-    if user_id_str not in data:
-        data[user_id_str] = {
-            "balance": 1000,  # Changed from 10000 to 1000
-            "blackjack": {"wins": 0, "losses": 0},
-            "coinflip": {"wins": 0, "losses": 0},
-            "last_claim": None
-        }
-        save_data(data)
-    
-    return data[user_id_str]["balance"] >= amount
-
-# Update user balance
-def update_balance(user_id, amount, game_type, result):
-    data = load_data()
-    user_id_str = str(user_id)
-    
-    if user_id_str not in data:
-        data[user_id_str] = {
-            "balance": 1000,  # Changed from 10000 to 1000
-            "blackjack": {"wins": 0, "losses": 0},
-            "coinflip": {"wins": 0, "losses": 0},
-            "last_claim": None
-        }
-    
-    data[user_id_str]["balance"] += amount
-    
-    if game_type == "blackjack":
-        if result == "win":
-            data[user_id_str]["blackjack"]["wins"] += 1
-        elif result == "loss":
-            data[user_id_str]["blackjack"]["losses"] += 1
-    elif game_type == "coinflip":
-        if result == "win":
-            data[user_id_str]["coinflip"]["wins"] += 1
-        elif result == "loss":
-            data[user_id_str]["coinflip"]["losses"] += 1
-    
-    save_data(data)
-    return data[user_id_str]["balance"]
-
-# Bot ready event
-@bot.event
-async def on_ready():
-    print(f'{bot.user.name} has connected to Discord!')
-    print(f'Bot is in {len(bot.guilds)} servers')
-    
-    # Sync commands with the server
-    try:
-        guild = discord.Object(id=SERVER_ID)
-        synced = await bot.tree.sync(guild=guild)
-        print(f"Synced {len(synced)} command(s) to guild {SERVER_ID}")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
-
-# Claim command
-@bot.tree.command(name="claim", description="Claim 1000 dabloons every hour if your balance is under 1000", guild=discord.Object(id=SERVER_ID))
-async def claim(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    data = load_data()
-    
-    if user_id not in data:
-        data[user_id] = {
+def get_user(data, user_id):
+    uid = str(user_id)
+    if uid not in data:
+        data[uid] = {
             "balance": 1000,
             "blackjack": {"wins": 0, "losses": 0},
             "coinflip": {"wins": 0, "losses": 0},
             "last_claim": None
         }
-    
-    # Check if user can claim
-    now = datetime.now()
-    last_claim = data[user_id].get("last_claim")
-    
-    if last_claim:
-        last_claim_date = datetime.fromisoformat(last_claim)
-        time_since_claim = now - last_claim_date
-        
-        if time_since_claim < timedelta(hours=1):
-            time_left = timedelta(hours=1) - time_since_claim
-            hours, remainder = divmod(time_left.total_seconds(), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            await interaction.response.send_message(f"You need to wait {int(hours)}h {int(minutes)}m {int(seconds)}s before you can claim again!")
-            return
-    
-    # Check if balance is under 1000
-    if data[user_id]["balance"] >= 1000:
-        await interaction.response.send_message("You can only claim dabloons if your balance is under 1000!")
-        return
-    
-    # Update balance and last claim time
-    data[user_id]["balance"] += 1000
-    data[user_id]["last_claim"] = now.isoformat()
-    save_data(data)
-    
-    await interaction.response.send_message(f"You've claimed 1000 dabloons! Your new balance is {data[user_id]['balance']} dabloons.")
+    return data[uid]
 
-# Blackjack command
-@bot.tree.command(name="bj", description="Play blackjack against the AI", guild=discord.Object(id=SERVER_ID))
-@app_commands.describe(amount="The amount of dabloons to bet")
-async def blackjack(interaction: discord.Interaction, amount: float):
-    user_id = str(interaction.user.id)
-    
-    # Check if user has enough balance
-    if not check_balance(user_id, amount):
-        await interaction.response.send_message(f"You don't have enough dabloons to bet {amount}!")
+# ------------------ BLACKJACK LOGIC ------------------
+
+def draw_card():
+    card = random.choice([2,3,4,5,6,7,8,9,10,10,10,10,11])
+    return card
+
+def hand_value(hand):
+    total = sum(hand)
+    aces = hand.count(11)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+# ------------------ BLACKJACK VIEW ------------------
+
+class BlackjackView(View):
+    def __init__(self, interaction, bet, data):
+        super().__init__(timeout=60)
+        self.interaction = interaction
+        self.bet = bet
+        self.data = data
+        self.player_hand = [draw_card(), draw_card()]
+        self.dealer_hand = [draw_card(), draw_card()]
+        self.doubled = False
+
+    async def update(self, end=False):
+        pv = hand_value(self.player_hand)
+        dv = hand_value(self.dealer_hand if end else [self.dealer_hand[0]])
+
+        embed = discord.Embed(title="🃏 Blackjack", color=0x2ecc71)
+        embed.add_field(name="Your Hand", value=f"{self.player_hand} = {pv}", inline=False)
+        embed.add_field(name="Dealer", value=f"{self.dealer_hand if end else [self.dealer_hand[0]]} = {dv}", inline=False)
+
+        if end:
+            self.clear_items()
+
+        await self.interaction.edit_original_response(embed=embed, view=self)
+
+    async def finish(self):
+        while hand_value(self.dealer_hand) < 17:
+            self.dealer_hand.append(draw_card())
+
+        pv = hand_value(self.player_hand)
+        dv = hand_value(self.dealer_hand)
+        user = get_user(self.data, self.interaction.user.id)
+
+        if pv > 21 or (dv <= 21 and dv > pv):
+            user["balance"] -= self.bet
+            user["blackjack"]["losses"] += 1
+            result = "❌ You lost!"
+        elif pv == 21 and len(self.player_hand) == 2:
+            win = int(self.bet * 1.5)
+            user["balance"] += win
+            user["blackjack"]["wins"] += 1
+            result = f"🎉 BLACKJACK! +{win}"
+        else:
+            user["balance"] += self.bet
+            user["blackjack"]["wins"] += 1
+            result = "✅ You won!"
+
+        save_data(self.data)
+        await self.update(end=True)
+        await self.interaction.followup.send(result)
+
+    @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary)
+    async def hit(self, interaction: discord.Interaction, _):
+        self.player_hand.append(draw_card())
+        if hand_value(self.player_hand) >= 21:
+            await self.finish()
+        else:
+            await self.update()
+
+    @discord.ui.button(label="Stand", style=discord.ButtonStyle.secondary)
+    async def stand(self, interaction: discord.Interaction, _):
+        await self.finish()
+
+    @discord.ui.button(label="Double", style=discord.ButtonStyle.danger)
+    async def double(self, interaction: discord.Interaction, _):
+        user = get_user(self.data, interaction.user.id)
+        if user["balance"] < self.bet:
+            await interaction.response.send_message("Not enough balance.", ephemeral=True)
+            return
+        self.bet *= 2
+        self.player_hand.append(draw_card())
+        await self.finish()
+
+# ------------------ SLASH COMMANDS ------------------
+
+@bot.tree.command(name="bj")
+@app_commands.describe(amount="Bet amount")
+async def blackjack(interaction: discord.Interaction, amount: int):
+    data = load_data()
+    user = get_user(data, interaction.user.id)
+
+    if amount <= 0 or user["balance"] < amount:
+        await interaction.response.send_message("Invalid bet.", ephemeral=True)
         return
-    
-    # Check if user is already in a game
-    if user_id in blackjack_games:
-        await interaction.response.send_message("You're already in a blackjack game! Use the buttons to continue.")
+
+    view = BlackjackView(interaction, amount, data)
+    await interaction.response.send_message("🃏 Blackjack started", view=view)
+    await view.update()
+
+# ------------------ COINFLIP ------------------
+
+@bot.tree.command(name="cf")
+@app_commands.describe(amount="Bet", choice="heads or tails", user="Optional opponent")
+async def coinflip(interaction: discord.Interaction, amount: int, choice: str, user: discord.User = None):
+    data = load_data()
+    p1 = get_user(data, interaction.user.id)
+
+    if p1["balance"] < amount or amount <= 0:
+        await interaction.response.send_message("Invalid bet.", ephemeral=True)
         return
-    
-    # Create a new game
-    deck = create_deck()
-    random.shuffle(deck)
-    
-    player_hand = [deck.pop(), deck.pop()]
-    dealer_hand = [deck.pop(), deck.pop()]
-    
-    # Check for blackjack
-    player_value = hand_value(player_hand)
-    dealer_value = hand_value(dealer_hand)
-    
-    if player_value == 21 and dealer_value == 21:
-        # Both have blackjack, it's a push
-        await interaction.response.send_message(f"**Blackjack Push!**\n\nYour hand: {format_hand(player_hand)} (21)\nDealer's hand: {format_hand(dealer_hand)} (21)\n\nYour bet of {amount} dabloons has been returned.")
+
+    result = random.choice(["heads", "tails"])
+
+    if user:
+        p2 = get_user(data, user.id)
+        if p2["balance"] < amount:
+            await interaction.response.send_message("Opponent lacks funds.", ephemeral=True)
+            return
+
+        winner = interaction.user if choice == result else user
+        loser = user if winner == interaction.user else interaction.user
+
+        get_user(data, winner.id)["balance"] += amount
+        get_user(data, loser.id)["balance"] -= amount
+    else:
+        if choice == result:
+            p1["balance"] += amount
+            p1["coinflip"]["wins"] += 1
+        else:
+            p1["balance"] -= amount
+            p1["coinflip"]["losses"] += 1
+
+    save_data(data)
+    await interaction.response.send_message(f"🪙 Coin landed **{result}**")
+
+# ------------------ LEADERBOARD ------------------
+
+@bot.tree.command(name="lb")
+async def leaderboard(interaction: discord.Interaction):
+    data = load_data()
+    sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)[:15]
+
+    embed = discord.Embed(title="🏆 Dabloons Leaderboard", color=0xf1c40f)
+    for i, (uid, u) in enumerate(sorted_users, 1):
+        embed.add_field(
+            name=f"#{i}",
+            value=f"<@{uid}> — 💰 {u['balance']}\nBJ {u['blackjack']['wins']}/{u['blackjack']['losses']} | CF {u['coinflip']['wins']}/{u['coinflip']['losses']}",
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed)
+
+# ------------------ CLAIM ------------------
+
+@bot.tree.command(name="claim")
+async def claim(interaction: discord.Interaction):
+    data = load_data()
+    user = get_user(data, interaction.user.id)
+
+    if user["balance"] >= 1000:
+        await interaction.response.send_message("You already have enough dabloons.")
         return
-    elif player_value == 21:
-        # Player has blackjack, win
-        new_balance = update_balance(user_id, amount * 1.5, "blackjack", "win")
-        await interaction.response.send_message(f"**Blackjack! You win!**\n\nYour hand: {format_hand(player_hand)} (21)\nDealer's hand: {format_hand(dealer_hand)} ({dealer_value})\n\nYou won {amount * 1.5} dabloons! Your new balance is {new_balance}.")
+
+    now = datetime.utcnow()
+    last = datetime.fromisoformat(user["last_claim"]) if user["last_claim"] else None
+
+    if last and now - last < timedelta(hours=1):
+        await interaction.response.send_message("⏳ Claim available once per hour.")
         return
-    elif dealer_value == 21:
-        # Dealer has blackjack, player loses
-        update_balance(user_id, -amount, "blackjack", "loss")
-        await interaction.response.send_message(f"**Dealer has Blackjack! You lose!**\n\nYour hand: {format_hand(player_hand)} ({player_value})\nDealer's hand: {format_hand(dealer_hand)} (21)\n\nYou lost {amount} dabloons.")
+
+    user["balance"] += 1000
+    user["last_claim"] = now.isoformat()
+    save_data(data)
+    await interaction.response.send_message("💰 Claimed 1000 dabloons!")
+
+# ------------------ GIVEAWAY ------------------
+
+@bot.tree.command(name="giveaway")
+@app_commands.checks.has_permissions(administrator=True)
+async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
+    await interaction.response.send_message("🎁 Giveaway started! React 🎉")
+    msg = await interaction.original_response()
+    await msg.add_reaction("🎉")
+
+    await asyncio.sleep(duration)
+    msg = await interaction.channel.fetch_message(msg.id)
+
+    users = [u for u in await msg.reactions[0].users().flatten() if not u.bot]
+    if not users:
         return
-    
-    # Create buttons
-    view = BlackjackView(user_id, amount, player_hand, dealer_hand, deck)
-    
-    # Send initial game state
-    await interaction.response.send_message(
-        f"**Blackjack**\n\nYour hand: {format_hand(player_hand)} ({player_value})\nDealer's hand: {dealer_hand[0]['rank']}{dealer_hand[0]['suit']} ?\n\nBet: {amount} dabloons",
-        view=view
-    )
-    
-    # Store
+
+    winners_list = random.sample(users, min(winners, len(users)))
+    data = load_data()
+
+    for w in winners_list:
+        get_user(data, w.id)["balance"] += amount
+
+    save_data(data)
+    await interaction.followup.send("🎉 Winners: " + ", ".join(w.mention for w in winners_list))
+
+# ------------------ READY ------------------
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"Logged in as {bot.user}")
+
+bot.run(TOKEN)
