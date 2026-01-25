@@ -318,8 +318,8 @@ async def cf(
     view = CoinflipView(interaction.user, user, amount, choice)
     await interaction.response.send_message(f"🪙 **Coinflip Challenge**\n{interaction.user.mention} vs {user.mention}\nBet: **{amount} dabloons**\n{user.mention}, click **Accept Coinflip**", view=view)
 
-@bot.tree.command(name="lb")
-async def lb(interaction: discord.Interaction):
+@bot.tree.command(name="leaderboard")
+async def leaderboard(interaction: discord.Interaction):
     if not data:
         return await interaction.response.send_message("No data yet.")
     sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
@@ -403,3 +403,4 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
+
