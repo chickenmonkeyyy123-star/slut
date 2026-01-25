@@ -18,7 +18,7 @@ if not TOKEN:
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
 START_BALANCE = 1000
-GUILD_ID = 1332118870181412936  # Your server ID
+GUILD_ID = 1332118870181412936
 
 # ---------- BOT ----------
 intents = discord.Intents.default()
@@ -57,10 +57,16 @@ def total_wl(u):
 # ---------- BLACKJACK ----------
 class BlackjackGame:
     def __init__(self, bet):
-        self.bet = bet
+        self.base_bet = bet
         self.deck = self.new_deck()
         random.shuffle(self.deck)
-        self.player = [self.deck.pop(), self.deck.pop()]
+
+        self.hands = [[self.deck.pop(), self.deck.pop()]]
+        self.bets = [bet]
+        self.finished = [False]
+        self.doubled = [False]
+        self.active_hand = 0
+
         self.dealer = [self.deck.pop(), self.deck.pop()]
 
     def new_deck(self):
@@ -81,115 +87,146 @@ class BlackjackGame:
             aces -= 1
         return total
 
+    def can_split(self):
+        hand = self.hands[self.active_hand]
+        return len(hand) == 2 and hand[0]["r"] == hand[1]["r"]
+
+    def split(self):
+        h = self.hands[self.active_hand]
+        c1, c2 = h
+        self.hands[self.active_hand] = [c1, self.deck.pop()]
+        self.hands.insert(self.active_hand + 1, [c2, self.deck.pop()])
+        self.bets.insert(self.active_hand + 1, self.base_bet)
+        self.finished.insert(self.active_hand + 1, False)
+        self.doubled.insert(self.active_hand + 1, False)
+
     def hit(self):
-        self.player.append(self.deck.pop())
-        return self.value(self.player) > 21
+        hand = self.hands[self.active_hand]
+        hand.append(self.deck.pop())
+        if self.value(hand) > 21:
+            self.finished[self.active_hand] = True
 
     def stand(self):
+        self.finished[self.active_hand] = True
+
+    def double(self):
+        self.bets[self.active_hand] *= 2
+        self.doubled[self.active_hand] = True
+        self.hit()
+        self.finished[self.active_hand] = True
+
+    def next_hand(self):
+        while self.active_hand < len(self.hands) and self.finished[self.active_hand]:
+            self.active_hand += 1
+
+    def dealer_play(self):
         while self.value(self.dealer) < 17:
             self.dealer.append(self.deck.pop())
 
-    def fmt(self, hand, hide=False):
-        if hide:
-            return "?, " + f"{hand[1]['r']}{hand[1]['s']}"
+    def fmt(self, hand):
         return ", ".join(f"{c['r']}{c['s']}" for c in hand)
 
 class BlackjackView(View):
     def __init__(self, game, user):
-        super().__init__(timeout=60)
+        super().__init__(timeout=90)
         self.game = game
         self.user = user
 
-    def embed(self, hide):
+    def embed(self, hide_dealer=True):
+        desc = ""
+        for i, hand in enumerate(self.game.hands):
+            pointer = "➡️ " if i == self.game.active_hand else ""
+            desc += (
+                f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} "
+                f"(Value: {self.game.value(hand)}) | Bet: {self.game.bets[i]}\n"
+            )
+
+        dealer = (
+            "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
+            if hide_dealer else self.game.fmt(self.game.dealer)
+        )
+
         return discord.Embed(
             title="🃏 Blackjack",
-            description=(
-                f"**Your hand:** {self.game.fmt(self.game.player)} "
-                f"(Value: {self.game.value(self.game.player)})\n"
-                f"**Dealer:** {self.game.fmt(self.game.dealer, hide)}"
-            ),
+            description=f"{desc}\n**Dealer:** {dealer}",
             color=discord.Color.blurple()
         )
+
+    async def advance(self, interaction):
+        self.game.next_hand()
+        if self.game.active_hand >= len(self.game.hands):
+            await self.end_game(interaction)
+        else:
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def end_game(self, interaction):
+        self.game.dealer_play()
+        dv = self.game.value(self.game.dealer)
+        u = get_user(self.user.id)
+
+        embed = self.embed(hide_dealer=False)
+        result = ""
+
+        for i, hand in enumerate(self.game.hands):
+            pv = self.game.value(hand)
+            bet = self.game.bets[i]
+
+            if pv > 21:
+                u["balance"] -= bet
+                u["blackjack"]["losses"] += 1
+                result += f"❌ Hand {i+1} busted\n"
+            elif dv > 21 or pv > dv:
+                u["balance"] += bet
+                u["blackjack"]["wins"] += 1
+                result += f"✅ Hand {i+1} wins\n"
+            elif pv < dv:
+                u["balance"] -= bet
+                u["blackjack"]["losses"] += 1
+                result += f"❌ Hand {i+1} loses\n"
+            else:
+                result += f"➖ Hand {i+1} push\n"
+
+        embed.description += "\n" + result
+        save_data()
+        self.stop()
+        await interaction.response.edit_message(embed=embed, view=None)
 
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
     async def hit(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
             return await interaction.response.send_message("Not your game.", ephemeral=True)
-        bust = self.game.hit()
-        embed = self.embed(True)
-        if bust:
-            embed.color = discord.Color.red()
-            embed.description += "\n\n💥 **Bust! You lose.**"
-            u = get_user(self.user.id)
-            u["balance"] -= self.game.bet
-            u["blackjack"]["losses"] += 1
-            save_data()
-            self.stop()
-            await interaction.response.edit_message(embed=embed, view=None)
-        else:
-            await interaction.response.edit_message(embed=embed, view=self)
+        self.game.hit()
+        await self.advance(interaction)
 
     @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
     async def stand(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
             return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.stand()
-        pv = self.game.value(self.game.player)
-        dv = self.game.value(self.game.dealer)
-        embed = self.embed(False)
+        await self.advance(interaction)
+
+    @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
+    async def double(self, interaction: discord.Interation, button: Button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         u = get_user(self.user.id)
-        if dv > 21 or pv > dv:
-            embed.color = discord.Color.green()
-            embed.description += "\n\n✅ **You win!**"
-            u["balance"] += self.game.bet
-            u["blackjack"]["wins"] += 1
-        elif pv < dv:
-            embed.color = discord.Color.red()
-            embed.description += "\n\n❌ **Dealer wins.**"
-            u["balance"] -= self.game.bet
-            u["blackjack"]["losses"] += 1
-        else:
-            embed.description += "\n\n➖ **Push (tie).**"
-        save_data()
-        self.stop()
-        await interaction.response.edit_message(embed=embed, view=None)
+        bet = self.game.bets[self.game.active_hand]
+        if u["balance"] < bet:
+            return await interaction.response.send_message("Not enough balance to double.", ephemeral=True)
+        self.game.double()
+        await self.advance(interaction)
 
-# ---------- COINFLIP VIEW ----------
-class CoinflipView(View):
-    def __init__(self, initiator, opponent, bet, choice):
-        super().__init__(timeout=60)
-        self.initiator = initiator
-        self.opponent = opponent
-        self.bet = bet
-        self.choice = choice
-
-    @discord.ui.button(label="Accept Coinflip", style=discord.ButtonStyle.green)
-    async def accept(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id != self.opponent.id:
-            return await interaction.response.send_message("This isn't for you.", ephemeral=True)
-        u1 = get_user(self.initiator.id)
-        u2 = get_user(self.opponent.id)
-        if u2["balance"] < self.bet:
-            return await interaction.response.send_message("You don't have enough balance.", ephemeral=True)
-        result = random.choice(["heads", "tails"])
-        self.stop()
-        if result == self.choice:
-            u1["balance"] += self.bet
-            u2["balance"] -= self.bet
-            u1["coinflip"]["wins"] += 1
-            u2["coinflip"]["losses"] += 1
-            winner = self.initiator
-        else:
-            u2["balance"] += self.bet
-            u1["balance"] -= self.bet
-            u2["coinflip"]["wins"] += 1
-            u1["coinflip"]["losses"] += 1
-            winner = self.opponent
-        save_data()
-        await interaction.response.edit_message(
-            content=f"🪙 **{result.upper()}**\n🏆 {winner.mention} won **{self.bet} dabloons**",
-            view=None
-        )
+    @discord.ui.button(label="Split", style=discord.ButtonStyle.gray)
+    async def split(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
+        if not self.game.can_split():
+            return await interaction.response.send_message("You can't split this hand.", ephemeral=True)
+        u = get_user(self.user.id)
+        if u["balance"] < self.game.base_bet:
+            return await interaction.response.send_message("Not enough balance to split.", ephemeral=True)
+        self.game.split()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
 
 # ---------- COMMANDS ----------
 @bot.tree.command(name="bj")
@@ -199,7 +236,7 @@ async def bj(interaction: discord.Interaction, amount: int):
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
     game = BlackjackGame(amount)
     view = BlackjackView(game, interaction.user)
-    await interaction.response.send_message(embed=view.embed(True), view=view)
+    await interaction.response.send_message(embed=view.embed(), view=view)
 
 @bot.tree.command(name="cf")
 @app_commands.describe(
@@ -394,4 +431,3 @@ async def on_ready():
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
-
