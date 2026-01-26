@@ -231,4 +231,8 @@ class CoinflipView(View):
         super().__init__(timeout=60)
         self.challenger = challenger
         self.opponent = opponent
-        self.amount
+        self.amount = amount
+        self.choice = choice.lower()
+        self.result_sent = False
+
+    @discord.ui.button(label="
