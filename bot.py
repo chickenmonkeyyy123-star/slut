@@ -228,6 +228,44 @@ class BlackjackView(View):
         self.game.split()
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
+# ---------- COINFLIP ----------
+class CoinflipView(View):
+    def __init__(self, challenger: discord.User, opponent: discord.User, amount: int, choice: str):
+        super().__init__(timeout=60)
+        self.challenger = challenger
+        self.opponent = opponent
+        self.amount = amount
+        self.choice = choice.lower()
+        self.result_sent = False
+
+    @discord.ui.button(label="Accept Coinflip", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.opponent.id:
+            return await interaction.response.send_message("You are not the opponent.", ephemeral=True)
+        if self.result_sent:
+            return
+        flip_result = random.choice(["heads", "tails"])
+        u = get_user(self.challenger.id)
+        o = get_user(self.opponent.id)
+
+        if flip_result == self.choice:
+            u["balance"] += self.amount
+            o["balance"] -= self.amount
+            u["coinflip"]["wins"] += 1
+            o["coinflip"]["losses"] += 1
+            msg = f"🪙 **{flip_result.upper()}** — {self.challenger.mention} won **{self.amount}** dabloons!"
+        else:
+            u["balance"] -= self.amount
+            o["balance"] += self.amount
+            u["coinflip"]["losses"] += 1
+            o["coinflip"]["wins"] += 1
+            msg = f"🪙 **{flip_result.upper()}** — {self.opponent.mention} won **{self.amount}** dabloons!"
+
+        save_data()
+        self.result_sent = True
+        self.stop()
+        await interaction.response.edit_message(content=msg, view=None)
+
 # ---------- COMMANDS ----------
 @bot.tree.command(name="bj")
 async def bj(interaction: discord.Interaction, amount: int):
@@ -244,12 +282,7 @@ async def bj(interaction: discord.Interaction, amount: int):
     choice="heads or tails",
     user="User to coinflip against (optional)"
 )
-async def cf(
-    interaction: discord.Interaction,
-    amount: int,
-    choice: str,
-    user: discord.User | None = None
-):
+async def cf(interaction: discord.Interaction, amount: int, choice: str, user: discord.User | None = None):
     choice = choice.lower()
     u = get_user(interaction.user.id)
     if choice not in ["heads", "tails"]:
@@ -282,10 +315,7 @@ async def cf(
         )
     view = CoinflipView(interaction.user, user, amount, choice)
     await interaction.response.send_message(
-        f"🪙 **Coinflip Challenge**\n"
-        f"{interaction.user.mention} vs {user.mention}\n"
-        f"Bet: **{amount} dabloons**\n"
-        f"{user.mention}, click **Accept Coinflip**",
+        f"🪙 **Coinflip Challenge**\n{interaction.user.mention} vs {user.mention}\nBet: **{amount} dabloons**\n{user.mention}, click **Accept Coinflip**",
         view=view
     )
 
@@ -314,16 +344,10 @@ class GiveawayView(View):
     @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
     async def enter(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id in self.entries:
-            await interaction.response.send_message(
-                "❌ You already entered this giveaway.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ You already entered this giveaway.", ephemeral=True)
             return
         self.entries.add(interaction.user.id)
-        await interaction.response.send_message(
-            "✅ You have entered the giveaway!",
-            ephemeral=True
-        )
+        await interaction.response.send_message("✅ You have entered the giveaway!", ephemeral=True)
 
 @bot.tree.command(name="giveaway")
 @app_commands.describe(
@@ -331,31 +355,15 @@ class GiveawayView(View):
     duration="Duration in seconds",
     winners="Number of winners"
 )
-async def giveaway(
-    interaction: discord.Interaction,
-    amount: int,
-    duration: int,
-    winners: int
-):
+async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message(
-            "❌ Only server admins can start a giveaway.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Only server admins can start a giveaway.", ephemeral=True)
     if amount <= 0 or duration <= 0 or winners <= 0:
-        return await interaction.response.send_message(
-            "❌ Amount, duration, and winners must be positive numbers.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Amount, duration, and winners must be positive numbers.", ephemeral=True)
     view = GiveawayView()
     embed = discord.Embed(
         title="🎉 Dabloons Giveaway!",
-        description=(
-            f"💰 **{amount} dabloons** per winner\n"
-            f"👑 **{winners} winner(s)**\n"
-            f"⏰ Ends in **{duration} seconds**\n\n"
-            f"Click 🎉 below to enter!"
-        ),
+        description=f"💰 **{amount} dabloons** per winner\n👑 **{winners} winner(s)**\n⏰ Ends in **{duration} seconds**\n\nClick 🎉 below to enter!",
         color=discord.Color.gold()
     )
     await interaction.response.send_message(embed=embed, view=view)
@@ -369,11 +377,7 @@ async def giveaway(
         get_user(user_id)["balance"] += amount
         save_data()
         mentions.append(f"<@{user_id}>")
-    await message.reply(
-        f"🎊 **GIVEAWAY ENDED!**\n"
-        f"🏆 Winner(s): {', '.join(mentions)}\n"
-        f"💰 Each winner received **{amount} dabloons**!"
-    )
+    await message.reply(f"🎊 **GIVEAWAY ENDED!**\n🏆 Winner(s): {', '.join(mentions)}\n💰 Each winner received **{amount} dabloons**!")
 
 # ---------- CLAIM ----------
 @bot.tree.command(name="claim")
@@ -389,36 +393,24 @@ async def claim(interaction: discord.Interaction):
 
     now = datetime.utcnow()
     last_claim_str = user.get("last_claim")
-
     if last_claim_str:
         last_claim = datetime.fromisoformat(last_claim_str)
-        remaining = (last_claim + timedelta(hours=1)) - now  # ✅ 1 HOUR COOLDOWN
+        remaining = (last_claim + timedelta(hours=1)) - now
         if remaining.total_seconds() > 0:
             minutes, seconds = divmod(int(remaining.total_seconds()), 60)
-            return await interaction.response.send_message(
-                f"⏳ Already claimed! Come back in **{minutes}m {seconds}s**.",
-                ephemeral=True
-            )
+            return await interaction.response.send_message(f"⏳ Already claimed! Come back in **{minutes}m {seconds}s**.", ephemeral=True)
 
     reward = 1000
     user["balance"] += reward
     user["last_claim"] = now.isoformat()
     save_data()
-
-    await interaction.response.send_message(
-        f"🎉 You claimed **{reward} dabloons**!\n💰 Your new balance: {user['balance']}",
-        ephemeral=True
-    )
-
+    await interaction.response.send_message(f"🎉 You claimed **{reward} dabloons**!\n💰 Your new balance: {user['balance']}", ephemeral=True)
 
 # ---------- SYNC ----------
 @bot.tree.command(name="sync")
 async def sync(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message(
-            "❌ Only server admins can sync commands.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Only server admins can sync commands.", ephemeral=True)
     guild = discord.Object(id=GUILD_ID)
     await bot.tree.sync(guild=guild)
     await interaction.response.send_message("✅ Commands fully resynced.", ephemeral=True)
@@ -427,7 +419,7 @@ async def sync(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)  # ensure commands appear immediately
+    await bot.tree.sync(guild=guild)
     print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
