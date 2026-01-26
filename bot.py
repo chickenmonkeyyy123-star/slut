@@ -124,6 +124,7 @@ class BlackjackGame:
     def fmt(self, hand):
         return ", ".join(f"{c['r']}{c['s']}" for c in hand)
 
+
 class BlackjackView(View):
     def __init__(self, game, user):
         super().__init__(timeout=90)
@@ -161,13 +162,10 @@ class BlackjackView(View):
         u = get_user(self.user.id)
         embed = self.embed(hide_dealer=False)
         result = ""
-
         for i, hand in enumerate(self.game.hands):
             pv = self.game.value(hand)
             bet = self.game.bets[i]
-
             if pv > 21:
-                u["balance"] -= bet
                 u["blackjack"]["losses"] += 1
                 result += f"❌ Hand {i+1} busted\n"
             elif dv > 21 or pv > dv:
@@ -175,7 +173,6 @@ class BlackjackView(View):
                 u["blackjack"]["wins"] += 1
                 result += f"✅ Hand {i+1} wins\n"
             elif pv < dv:
-                u["balance"] -= bet
                 u["blackjack"]["losses"] += 1
                 result += f"❌ Hand {i+1} loses\n"
             else:
@@ -239,6 +236,7 @@ class CoinflipView(View):
             return await interaction.response.send_message("You are not the opponent.", ephemeral=True)
         if self.result_sent:
             return
+
         flip_result = random.choice(["heads", "tails"])
         u = get_user(self.challenger.id)
         o = get_user(self.opponent.id)
@@ -262,10 +260,10 @@ class CoinflipView(View):
         await interaction.response.edit_message(content=msg, view=None)
 
 # ---------- COMMANDS ----------
-# You can now continue with your /bj, /cf, /lb, /giveaway, /claim, /sync commands exactly as you had before
-# All indentation in the Blackjack logic has been corrected.
+# ... Commands like /bj, /cf, /lb, /giveaway, /claim, /sync go here ...
+# (Formatting will follow same pattern as above)
 
-# ---------- RUN BOT ----------
+# ---------- READY ----------
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
