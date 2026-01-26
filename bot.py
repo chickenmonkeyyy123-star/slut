@@ -64,8 +64,8 @@ class BlackjackGame:
         self.hands = [[self.deck.pop(), self.deck.pop()]]
         self.bets = [bet]
         self.finished = [False]
+        self.doubled = [False]
         self.active_hand = 0
-
         self.dealer = [self.deck.pop(), self.deck.pop()]
 
     def new_deck(self):
@@ -86,12 +86,32 @@ class BlackjackGame:
             aces -= 1
         return total
 
+    def can_split(self):
+        hand = self.hands[self.active_hand]
+        return len(hand) == 2 and hand[0]["r"] == hand[1]["r"]
+
+    def split(self):
+        h = self.hands[self.active_hand]
+        c1, c2 = h
+        self.hands[self.active_hand] = [c1, self.deck.pop()]
+        self.hands.insert(self.active_hand + 1, [c2, self.deck.pop()])
+        self.bets.insert(self.active_hand + 1, self.base_bet)
+        self.finished.insert(self.active_hand + 1, False)
+        self.doubled.insert(self.active_hand + 1, False)
+
     def hit(self):
-        self.hands[self.active_hand].append(self.deck.pop())
-        if self.value(self.hands[self.active_hand]) > 21:
+        hand = self.hands[self.active_hand]
+        hand.append(self.deck.pop())
+        if self.value(hand) > 21:
             self.finished[self.active_hand] = True
 
     def stand(self):
+        self.finished[self.active_hand] = True
+
+    def double(self):
+        self.bets[self.active_hand] *= 2
+        self.doubled[self.active_hand] = True
+        self.hit()
         self.finished[self.active_hand] = True
 
     def next_hand(self):
@@ -115,7 +135,10 @@ class BlackjackView(View):
         desc = ""
         for i, hand in enumerate(self.game.hands):
             pointer = "➡️ " if i == self.game.active_hand else ""
-            desc += f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} ({self.game.value(hand)})\n"
+            desc += (
+                f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} "
+                f"(Value: {self.game.value(hand)}) | Bet: {self.game.bets[i]}\n"
+            )
 
         dealer = (
             "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
@@ -140,26 +163,30 @@ class BlackjackView(View):
         dv = self.game.value(self.game.dealer)
         u = get_user(self.user.id)
 
-        result = ""
         embed = self.embed(hide_dealer=False)
+        result = ""
 
         for i, hand in enumerate(self.game.hands):
             pv = self.game.value(hand)
             bet = self.game.bets[i]
 
             if pv > 21:
-                u["blackjack"]["losses"] += 1
-                result += f"❌ Hand {i+1} busted\n"
-            elif dv > 21 or pv > dv:
-                u["balance"] += bet * 2
-                u["blackjack"]["wins"] += 1
-                result += f"✅ Hand {i+1} wins (+{bet})\n"
-            elif pv < dv:
-                u["blackjack"]["losses"] += 1
-                result += f"❌ Hand {i+1} loses\n"
-            else:
-                u["balance"] += bet
-                result += f"➖ Hand {i+1} push\n"
+    u["blackjack"]["losses"] += 1
+    result += f"❌ Hand {i+1} busted\n"
+
+elif dv > 21 or pv > dv:
+    u["balance"] += bet * 2
+    u["blackjack"]["wins"] += 1
+    result += f"✅ Hand {i+1} wins (+{bet})\n"
+
+elif pv < dv:
+    u["blackjack"]["losses"] += 1
+    result += f"❌ Hand {i+1} loses\n"
+
+else:
+    u["balance"] += bet
+    result += f"➖ Hand {i+1} push (bet returned)\n"
+
 
         embed.description += "\n" + result
         save_data()
@@ -167,78 +194,57 @@ class BlackjackView(View):
         await interaction.response.edit_message(embed=embed, view=None)
 
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
-    async def hit(self, interaction: discord.Interaction, button: Button):
+    async def hit_btn(self, interaction, button):
         if interaction.user.id != self.user.id:
-            return
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.hit()
         await self.advance(interaction)
 
     @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
-    async def stand(self, interaction: discord.Interaction, button: Button):
+    async def stand_btn(self, interaction, button):
         if interaction.user.id != self.user.id:
-            return
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.stand()
         await self.advance(interaction)
+
+    @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
+    async def double_btn(self, interaction, button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
+        self.game.double()
+        await self.advance(interaction)
+
+    @discord.ui.button(label="Split", style=discord.ButtonStyle.gray)
+    async def split_btn(self, interaction, button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
+        if not self.game.can_split():
+            return await interaction.response.send_message("You can't split this hand.", ephemeral=True)
+        self.game.split()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
 
 # ---------- COMMANDS ----------
 @bot.tree.command(name="bj")
 async def bj(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
+
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
 
+    # TAKE MONEY IMMEDIATELY
     u["balance"] -= amount
     save_data()
 
     game = BlackjackGame(amount)
-    await interaction.response.send_message(embed=BlackjackView(game, interaction.user).embed(),
-                                            view=BlackjackView(game, interaction.user))
+    view = BlackjackView(game, interaction.user)
 
-# ---------- GIVEAWAY ----------
-class GiveawayView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.entries = set()
-
-    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
-    async def enter(self, interaction: discord.Interaction, button: Button):
-        if interaction.user.id in self.entries:
-            return await interaction.response.send_message("Already entered.", ephemeral=True)
-        self.entries.add(interaction.user.id)
-        await interaction.response.send_message("Entered giveaway!", ephemeral=True)
-
-@bot.tree.command(name="giveaway")
-async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("Admin only.", ephemeral=True)
-
-    view = GiveawayView()
-    embed = discord.Embed(
-        title="🎉 Dabloons Giveaway",
-        description=f"{amount} dabloons per winner\n{winners} winner(s)\nEnds in {duration}s",
-        color=discord.Color.gold()
-    )
-
-    await interaction.response.send_message(embed=embed, view=view)
-    msg = await interaction.original_response()
-
-    await asyncio.sleep(duration)
-
-    if not view.entries:
-        return await msg.reply("No entries.")
-
-    winners_ids = random.sample(list(view.entries), k=min(winners, len(view.entries)))
-    for uid in winners_ids:
-        get_user(uid)["balance"] += amount
-    save_data()
-
-    await msg.reply("🏆 Winners: " + ", ".join(f"<@{u}>" for u in winners_ids))
+    await interaction.response.send_message(embed=view.embed(), view=view)
 
 # ---------- READY ----------
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
     await bot.tree.sync(guild=guild)
-    print(f"Logged in as {bot.user}")
+    print(f"Logged in as {bot.user} and synced commands to guild {GUILD_ID}")
 
 bot.run(TOKEN)
