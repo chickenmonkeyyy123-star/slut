@@ -482,6 +482,44 @@ async def chicken(interaction: discord.Interaction, amount: int):
     view = ChickenView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
+---------- TIP COMMAND ----------
+
+@bot.tree.command(name="tip", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    amount="Amount of dabloons to tip",
+    user="User to tip"
+)
+async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
+    if amount <= 0:
+        return await interaction.response.send_message(
+            "❌ Tip amount must be positive.",
+            ephemeral=True
+        )
+
+    if user.id == interaction.user.id:
+        return await interaction.response.send_message(
+            "❌ You can’t tip yourself.",
+            ephemeral=True
+        )
+
+    sender = get_user(interaction.user.id)
+    receiver = get_user(user.id)
+
+    if sender["balance"] < amount:
+        return await interaction.response.send_message(
+            "❌ You don’t have enough dabloons.",
+            ephemeral=True
+        )
+
+    sender["balance"] -= amount
+    receiver["balance"] += amount
+    save_data()
+
+    await interaction.response.send_message(
+        f"💸 **{interaction.user.mention} tipped {user.mention} `{amount}` dabloons!**"
+    )
+
+
 # ---------- COMMANDS ----------
 @bot.tree.command(name="bj")
 async def bj(interaction: discord.Interaction, amount: int):
@@ -570,6 +608,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
