@@ -70,13 +70,14 @@ def get_user(uid):
 
 def total_wl(u):
     return (
-        u["blackjack"]["wins"]
-        + u["coinflip"]["wins"]
-        + u["limbo"]["wins"],
-        u["blackjack"]["losses"]
-        + u["coinflip"]["losses"]
-        + u["limbo"]["losses"],
+        u.get("blackjack", {}).get("wins", 0)
+        + u.get("coinflip", {}).get("wins", 0)
+        + u.get("limbo", {}).get("wins", 0),
+        u.get("blackjack", {}).get("losses", 0)
+        + u.get("coinflip", {}).get("losses", 0)
+        + u.get("limbo", {}).get("losses", 0),
     )
+
 
 # ---------- BLACKJACK ----------
 class BlackjackGame:
@@ -603,5 +604,6 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
 
 
