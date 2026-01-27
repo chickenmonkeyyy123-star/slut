@@ -17,6 +17,7 @@ if not TOKEN:
 
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
+MAX_CHICKEN_BET = 15000
 MAX_LIMBO_MULTIPLIER = 100
 START_BALANCE = 1000
 GUILD_ID = 1332118870181412936
@@ -45,15 +46,21 @@ def get_user(uid):
             "balance": START_BALANCE,
             "blackjack": {"wins": 0, "losses": 0},
             "coinflip": {"wins": 0, "losses": 0},
+            "chicken": {"wins": 0, "losses": 0},
         }
         save_data()
+
+    # Safety: in case existing users don't have chicken stats
+    data[uid].setdefault("chicken", {"wins": 0, "losses": 0})
+
     return data[uid]
 
 def total_wl(u):
     return (
-        u["blackjack"]["wins"] + u["coinflip"]["wins"],
-        u["blackjack"]["losses"] + u["coinflip"]["losses"],
+        u["blackjack"]["wins"] + u["coinflip"]["wins"] + u["chicken"]["wins"],
+        u["blackjack"]["losses"] + u["coinflip"]["losses"] + u["chicken"]["losses"],
     )
+
 
 # ---------- BLACKJACK ----------
 class BlackjackGame:
@@ -358,18 +365,18 @@ async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     save_data()
     await interaction.response.send_message(msg)
 
-# ---------- CHICKEN (BOOST FIXED TO 0.5) ----------
+# ---------- CHICKEN GAME ----------
 class ChickenGame:
     def __init__(self, bet):
         self.bet = bet
-        self.multiplier = 1
+        self.multiplier = 1.0
         self.crash = random.randint(10, 100) / 10  # 1.0x–10.0x
         self.finished = False
 
     def boost(self):
         if self.finished:
             return False
-        self.multiplier += 0.5  # <- FIXED HERE
+        self.multiplier += 0.5
         if self.multiplier >= self.crash:
             self.finished = True
             return False
@@ -377,7 +384,8 @@ class ChickenGame:
 
     def cashout(self):
         self.finished = True
-        return self.bet * self.multiplier
+        return int(self.bet * self.multiplier)
+
 
 class ChickenView(View):
     def __init__(self, game, user):
@@ -390,9 +398,9 @@ class ChickenView(View):
         return discord.Embed(
             title="🐔 Chicken Game",
             description=(
-                f"💰 Bet: {self.game.bet}\n"
-                f"🚀 Multiplier: {self.game.multiplier:.1f}x\n"
-                f"⚠️ Crash at: ???"
+                f"💰 Bet: **{self.game.bet}**\n"
+                f"🚀 Multiplier: **{self.game.multiplier:.1f}x**\n"
+                f"⚠️ Crash at: **???**"
             ),
             color=discord.Color.orange(),
         )
@@ -400,11 +408,12 @@ class ChickenView(View):
     @discord.ui.button(label="⬆️ Boost", style=discord.ButtonStyle.green)
     async def boost(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("Not your game!", ephemeral=True)
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         if not self.active:
             return
 
         alive = self.game.boost()
+
         if alive:
             await interaction.response.edit_message(embed=self.embed(), view=self)
         else:
@@ -412,41 +421,55 @@ class ChickenView(View):
             u["balance"] -= self.game.bet
             u["chicken"]["losses"] += 1
             save_data()
+
             self.active = False
             self.stop()
             await interaction.response.edit_message(
-                content=f"💥 Chicken crashed at **{self.game.multiplier:.1f}x**! You lost **{self.game.bet} dabloons**.",
-                embed=None, view=None
+                content=f"💥 **CRASHED at {self.game.multiplier:.1f}x** — You lost **{self.game.bet} dabloons**.",
+                embed=None,
+                view=None
             )
 
     @discord.ui.button(label="💰 Cash Out", style=discord.ButtonStyle.blurple)
     async def cashout(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("Not your game!", ephemeral=True)
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         if not self.active:
             return
 
         winnings = self.game.cashout()
         u = get_user(self.user.id)
-        u["balance"] += int(winnings)
+        u["balance"] += winnings
         u["chicken"]["wins"] += 1
         save_data()
 
         self.active = False
         self.stop()
         await interaction.response.edit_message(
-            content=f"🏆 You cashed out at **{self.game.multiplier:.1f}x** and won **{int(winnings)} dabloons!**",
-            embed=None, view=None
+            content=f"🏆 **Cashed out at {self.game.multiplier:.1f}x** — You won **{winnings} dabloons!**",
+            embed=None,
+            view=None
         )
+
 
 @bot.tree.command(name="chicken", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(amount="Bet amount")
 async def chicken(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
 
-    if amount <= 0 or amount > u["balance"]:
+    if amount <= 0:
+        return await interaction.response.send_message("❌ Invalid bet.", ephemeral=True)
+
+    if amount > MAX_CHICKEN_BET:
         return await interaction.response.send_message(
-            "❌ Invalid bet.", ephemeral=True
+            f"❌ Max Chicken bet is **{MAX_CHICKEN_BET} dabloons**.",
+            ephemeral=True
+        )
+
+    if amount > u["balance"]:
+        return await interaction.response.send_message(
+            "❌ You don't have enough balance.",
+            ephemeral=True
         )
 
     game = ChickenGame(amount)
@@ -541,5 +564,6 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
