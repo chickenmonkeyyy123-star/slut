@@ -271,7 +271,7 @@ async def giveaway(
 
 # ---------- CLAIM ----------
 
-@bot.tree.command(name="claim",)
+@bot.tree.command(name="claim")
 async def claim(interaction: discord.Interaction):
     u = get_user(interaction.user.id)
 
@@ -306,7 +306,7 @@ async def claim(interaction: discord.Interaction):
 
 
 # ---------- LIMBO ----------
-@bot.tree.command(name="limbo"), guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="limbo", guild=discord.Object(id=GUILD_ID))
 async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     u = get_user(interaction.user.id)
 
