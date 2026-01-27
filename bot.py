@@ -189,8 +189,124 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str):
     save_data()
     await interaction.response.send_message(msg)
 
+# ---------- GIVEAWAY ----------
+
+class GiveawayView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.entries = set()
+
+    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green)
+    async def enter(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id in self.entries:
+            return await interaction.response.send_message(
+                "❌ You already entered.", ephemeral=True
+            )
+        self.entries.add(interaction.user.id)
+        await interaction.response.send_message(
+            "✅ You entered the giveaway!", ephemeral=True
+        )
+
+
+@bot.tree.command(name="giveaway")
+@app_commands.describe(
+    amount="Dabloons per winner",
+    duration="Duration in seconds",
+    winners="Number of winners"
+)
+async def giveaway(
+    interaction: discord.Interaction,
+    amount: int,
+    duration: int,
+    winners: int
+):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ Admins only.", ephemeral=True
+        )
+
+    if amount <= 0 or duration <= 0 or winners <= 0:
+        return await interaction.response.send_message(
+            "❌ Invalid values.", ephemeral=True
+        )
+
+    view = GiveawayView()
+    embed = discord.Embed(
+        title="🎉 DABLOONS GIVEAWAY",
+        description=(
+            f"💰 **{amount} dabloons** per winner\n"
+            f"👑 **{winners} winner(s)**\n"
+            f"⏰ Ends in **{duration} seconds**\n\n"
+            "Click 🎉 to enter!"
+        ),
+        color=discord.Color.gold()
+    )
+
+    await interaction.response.send_message(embed=embed, view=view)
+    message = await interaction.original_response()
+
+    await asyncio.sleep(duration)
+
+    if not view.entries:
+        return await message.reply("❌ Giveaway ended — no entries.")
+
+    chosen = random.sample(
+        list(view.entries),
+        k=min(winners, len(view.entries))
+    )
+
+    mentions = []
+    for uid in chosen:
+        get_user(uid)["balance"] += amount
+        mentions.append(f"<@{uid}>")
+
+    save_data()
+
+    await message.reply(
+        f"🎊 **GIVEAWAY ENDED!**\n"
+        f"🏆 Winners: {', '.join(mentions)}\n"
+        f"💰 Each won **{amount} dabloons**"
+    )
+
+
+# ---------- CLAIM ----------
+
+@bot.tree.command(name="claim",)
+async def claim(interaction: discord.Interaction):
+    u = get_user(interaction.user.id)
+
+    if u["balance"] >= 1000:
+        return await interaction.response.send_message(
+            "❌ Your balance is too high to claim.",
+            ephemeral=True
+        )
+
+    now = datetime.utcnow()
+    last = u.get("last_claim")
+
+    if last:
+        last = datetime.fromisoformat(last)
+        remaining = timedelta(hours=1) - (now - last)
+        if remaining.total_seconds() > 0:
+            m, s = divmod(int(remaining.total_seconds()), 60)
+            return await interaction.response.send_message(
+                f"⏳ Come back in **{m}m {s}s**.",
+                ephemeral=True
+            )
+
+    u["balance"] += 1000
+    u["last_claim"] = now.isoformat()
+    save_data()
+
+    await interaction.response.send_message(
+        "🎉 You claimed **1000 dabloons!**",
+        ephemeral=True
+    )
+
+
+
 # ---------- LIMBO ----------
-@bot.tree.command(name="limbo")
+@bot.tree.command(name="limbo"), guild=discord.Object(id=GUILD_ID))
 async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     u = get_user(interaction.user.id)
 
@@ -215,7 +331,7 @@ async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     await interaction.response.send_message(msg)
 
 # ---------- CHICKEN ----------
-@bot.tree.command(name="chicken")
+@bot.tree.command(name="chicken"), guild=discord.Object(id=GUILD_ID))
 async def chicken(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
     if amount <= 0 or amount > u["balance"]:
@@ -240,7 +356,7 @@ async def chicken(interaction: discord.Interaction, amount: int):
     await interaction.response.send_message(msg)
 
 # ---------- TIP ----------
-@bot.tree.command(name="tip")
+@bot.tree.command(name="tip"), guild=discord.Object(id=GUILD_ID))
 async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
     sender = get_user(interaction.user.id)
     receiver = get_user(user.id)
@@ -276,3 +392,4 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
