@@ -273,22 +273,25 @@ class BlackjackView(View):
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
 # ---------- LIMBO ----------
+
 @bot.tree.command(name="limbo", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     amount="Bet amount",
-    multiplier="Target multiplier (2, 3, 4, 5, etc — no decimals)",
+    multiplier="Target multiplier (2–100)",
 )
 async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     u = get_user(interaction.user.id)
 
     if amount <= 0 or amount > u["balance"]:
-        return await interaction.response.send_message("❌ Invalid bet amount.", ephemeral=True)
+        return await interaction.response.send_message(
+            "❌ Invalid bet amount.", ephemeral=True
+        )
 
     if multiplier < 2 or multiplier > MAX_LIMBO_MULTIPLIER:
-    return await interaction.response.send_message(
-        f"❌ Multiplier must be between **2x** and **{MAX_LIMBO_MULTIPLIER}x**.",
-        ephemeral=True,
-    )
+        return await interaction.response.send_message(
+            f"❌ Multiplier must be between **2x** and **{MAX_LIMBO_MULTIPLIER}x**.",
+            ephemeral=True,
+        )
 
     win_chance = 1 / multiplier
     roll = random.random()
@@ -313,6 +316,7 @@ async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
 
     save_data()
     await interaction.response.send_message(msg)
+
 
 # ---------- COINFLIP ----------
 class CoinflipView(View):
@@ -609,6 +613,7 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
 
 
 
