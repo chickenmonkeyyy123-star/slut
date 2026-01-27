@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import View, Button
 
+
 import random
 import json
 import os
@@ -20,6 +21,7 @@ if not TOKEN:
 
 # ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
+MAX_LIMBO_MULTIPLIER = 100
 START_BALANCE = 1000
 GUILD_ID = 1332118870181412936
 
@@ -282,8 +284,11 @@ async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("❌ Invalid bet amount.", ephemeral=True)
 
-    if multiplier < 2:
-        return await interaction.response.send_message("❌ Multiplier must be **2 or higher**.", ephemeral=True)
+    if multiplier < 2 or multiplier > MAX_LIMBO_MULTIPLIER:
+    return await interaction.response.send_message(
+        f"❌ Multiplier must be between **2x** and **{MAX_LIMBO_MULTIPLIER}x**.",
+        ephemeral=True,
+    )
 
     win_chance = 1 / multiplier
     roll = random.random()
@@ -604,6 +609,7 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
 
 
 
