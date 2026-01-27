@@ -535,15 +535,6 @@ async def claim(interaction: discord.Interaction):
 
 # ---------- SYNC ----------
 @bot.tree.command(name="sync", guild=discord.Object(id=GUILD_ID))
-async def sync(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("Admins only.", ephemeral=True)
-    guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)
-    await interaction.response.send_message("✅ Synced.", ephemeral=True)
-
-
-@bot.tree.command(name="wipe", guild=discord.Object(id=GUILD_ID))
 async def wipe(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("Admins only.", ephemeral=True)
@@ -553,7 +544,6 @@ async def wipe(interaction: discord.Interaction):
 
     await interaction.response.send_message("🧹 All guild slash commands wiped.", ephemeral=True)
 
-
 # ---------- READY ----------
 @bot.event
 async def on_ready():
@@ -562,4 +552,5 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
