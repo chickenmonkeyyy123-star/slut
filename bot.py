@@ -20,7 +20,7 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN not found in .env")
 
 DATA_FILE = "dabloon_data.json"
-MAX_CHICKEN_BET = 15000
+MAX_CHICKEN_BET = 5000
 MAX_LIMBO_MULTIPLIER = 100
 START_BALANCE = 1000
 GUILD_ID = 1332118870181412936
@@ -617,5 +617,6 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
