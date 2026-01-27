@@ -408,7 +408,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ---------- TREE SLASH COMMANDS -----------
 # ==========================================
 
-@bot.tree.command(name="bj")
+@bot.tree.command(name="bj", guild=discord.Object(id=GUILD_ID))
 async def bj(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
     if amount <= 0 or amount > u["balance"]:
@@ -417,7 +417,7 @@ async def bj(interaction: discord.Interaction, amount: int):
     view = BlackjackView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
-@bot.tree.command(name="cf")
+@bot.tree.command(name="cf", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(amount="Bet", choice="heads or tails", user="Opponent (optional)")
 async def cf(interaction: discord.Interaction, amount: int, choice: str, user: discord.User | None = None):
     choice = choice.lower()
@@ -454,7 +454,7 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str, user: d
         view=view
     )
 
-@bot.tree.command(name="giveaway")
+@bot.tree.command(name="giveaway", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(amount="Dabloons per winner", duration="Duration in seconds", winners="Number of winners")
 async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
     if not interaction.user.guild_permissions.administrator:
@@ -536,7 +536,7 @@ async def chicken(interaction: discord.Interaction, amount: int):
     view = ChickenView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
-@bot.tree.command(name="lb")
+@bot.tree.command(name="lb", guild=discord.Object(id=GUILD_ID))
 async def leaderboard(interaction: discord.Interaction):
     if not data:
         return await interaction.response.send_message("No data yet.")
@@ -548,7 +548,7 @@ async def leaderboard(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 Leaderboard", description="\n".join(lines), color=discord.Color.gold())
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="claim")
+@bot.tree.command(name="claim", guild=discord.Object(id=GUILD_ID))
 async def claim(interaction: discord.Interaction):
     user = get_user(interaction.user.id)
     if user["balance"] >= 1000:
@@ -617,3 +617,4 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
