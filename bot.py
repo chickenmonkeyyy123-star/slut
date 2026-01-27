@@ -454,7 +454,7 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str, user: d
         view=view
     )
 
-@bot.tree.command(name="giveaway", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="giveaway")
 @app_commands.describe(amount="Dabloons per winner", duration="Duration in seconds", winners="Number of winners")
 async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
     if not interaction.user.guild_permissions.administrator:
@@ -617,4 +617,5 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
