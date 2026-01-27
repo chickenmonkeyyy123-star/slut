@@ -50,6 +50,7 @@ def get_user(uid):
             "balance": START_BALANCE,
             "blackjack": {"wins": 0, "losses": 0},
             "coinflip": {"wins": 0, "losses": 0},
+            "limbo": {"wins": 0, "losses": 0},
         }
         save_data()
     return data[uid]
@@ -57,8 +58,12 @@ def get_user(uid):
 
 def total_wl(u):
     return (
-        u["blackjack"]["wins"] + u["coinflip"]["wins"],
-        u["blackjack"]["losses"] + u["coinflip"]["losses"],
+        u["blackjack"]["wins"]
+        + u["coinflip"]["wins"]
+        + u["limbo"]["wins"],
+        u["blackjack"]["losses"]
+        + u["coinflip"]["losses"]
+        + u["limbo"]["losses"],
     )
 
 # ---------- BLACKJACK ----------
@@ -211,35 +216,27 @@ class BlackjackView(View):
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
     async def hit(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            return await interaction.response.send_message(
-                "Not your game.", ephemeral=True
-            )
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.hit()
         await self.advance(interaction)
 
     @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
     async def stand(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            return await interaction.response.send_message(
-                "Not your game.", ephemeral=True
-            )
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
         self.game.stand()
         await self.advance(interaction)
 
     @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
     async def double(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            return await interaction.response.send_message(
-                "Not your game.", ephemeral=True
-            )
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
 
         u = get_user(self.user.id)
         bet = self.game.bets[self.game.active_hand]
 
         if u["balance"] < bet:
-            return await interaction.response.send_message(
-                "Not enough balance to double.", ephemeral=True
-            )
+            return await interaction.response.send_message("Not enough balance to double.", ephemeral=True)
 
         self.game.double()
         await self.advance(interaction)
@@ -247,24 +244,57 @@ class BlackjackView(View):
     @discord.ui.button(label="Split", style=discord.ButtonStyle.gray)
     async def split(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
-            return await interaction.response.send_message(
-                "Not your game.", ephemeral=True
-            )
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
 
         if not self.game.can_split():
-            return await interaction.response.send_message(
-                "You can't split this hand.", ephemeral=True
-            )
+            return await interaction.response.send_message("You can't split this hand.", ephemeral=True)
 
         u = get_user(self.user.id)
 
         if u["balance"] < self.game.base_bet:
-            return await interaction.response.send_message(
-                "Not enough balance to split.", ephemeral=True
-            )
+            return await interaction.response.send_message("Not enough balance to split.", ephemeral=True)
 
         self.game.split()
         await interaction.response.edit_message(embed=self.embed(), view=self)
+
+# ---------- LIMBO ----------
+@bot.tree.command(name="limbo")
+@app_commands.describe(
+    amount="Bet amount",
+    multiplier="Target multiplier (2, 3, 4, 5, etc — no decimals)",
+)
+async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
+    u = get_user(interaction.user.id)
+
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message("❌ Invalid bet amount.", ephemeral=True)
+
+    if multiplier < 2:
+        return await interaction.response.send_message("❌ Multiplier must be **2 or higher**.", ephemeral=True)
+
+    win_chance = 1 / multiplier
+    roll = random.random()
+
+    if roll <= win_chance:
+        profit = amount * (multiplier - 1)
+        u["balance"] += profit
+        u["limbo"]["wins"] += 1
+        msg = (
+            f"🚀 **LIMBO WIN!**\n"
+            f"🎯 Target: **{multiplier}x**\n"
+            f"💰 Profit: **+{profit} dabloons**"
+        )
+    else:
+        u["balance"] -= amount
+        u["limbo"]["losses"] += 1
+        msg = (
+            f"💥 **LIMBO CRASHED!**\n"
+            f"🎯 Target: **{multiplier}x**\n"
+            f"💸 Lost: **-{amount} dabloons**"
+        )
+
+    save_data()
+    await interaction.response.send_message(msg)
 
 # ---------- COINFLIP ----------
 class CoinflipView(View):
@@ -561,3 +591,4 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
