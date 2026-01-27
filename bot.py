@@ -331,7 +331,7 @@ async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     await interaction.response.send_message(msg)
 
 # ---------- CHICKEN ----------
-@bot.tree.command(name="chicken"), guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="chicken", guild=discord.Object(id=GUILD_ID))
 async def chicken(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
     if amount <= 0 or amount > u["balance"]:
@@ -356,7 +356,7 @@ async def chicken(interaction: discord.Interaction, amount: int):
     await interaction.response.send_message(msg)
 
 # ---------- TIP ----------
-@bot.tree.command(name="tip"), guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="tip", guild=discord.Object(id=GUILD_ID))
 async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
     sender = get_user(interaction.user.id)
     receiver = get_user(user.id)
