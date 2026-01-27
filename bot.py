@@ -45,6 +45,7 @@ data = load_data()
 
 def get_user(uid):
     uid = str(uid)
+
     if uid not in data:
         data[uid] = {
             "balance": START_BALANCE,
@@ -53,7 +54,18 @@ def get_user(uid):
             "limbo": {"wins": 0, "losses": 0},
         }
         save_data()
-    return data[uid]
+        return data[uid]
+
+    u = data[uid]
+
+    # ---- BACKFILL MISSING STATS FOR OLD USERS ----
+    u.setdefault("balance", START_BALANCE)
+    u.setdefault("blackjack", {"wins": 0, "losses": 0})
+    u.setdefault("coinflip", {"wins": 0, "losses": 0})
+    u.setdefault("limbo", {"wins": 0, "losses": 0})
+
+    save_data()
+    return u
 
 
 def total_wl(u):
@@ -591,4 +603,5 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
 
