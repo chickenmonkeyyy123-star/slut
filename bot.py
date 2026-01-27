@@ -283,7 +283,7 @@ class GiveawayView(View):
         self.entries.add(interaction.user.id)
         await interaction.response.send_message("✅ You have entered the giveaway!", ephemeral=True)
 
-@bot.tree.command(name="giveaway", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="giveaway")
 @app_commands.describe(
     amount="Dabloons per winner",
     duration="Duration in seconds",
@@ -454,7 +454,7 @@ async def chicken(interaction: discord.Interaction, amount: int):
     await interaction.response.send_message(embed=view.embed(), view=view)
 
 # ---------- COMMANDS ----------
-@bot.tree.command(name="bj", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="bj")
 async def bj(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
     if amount <= 0 or amount > u["balance"]:
@@ -463,7 +463,7 @@ async def bj(interaction: discord.Interaction, amount: int):
     view = BlackjackView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
-@bot.tree.command(name="cf", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="cf")
 @app_commands.describe(amount="Bet", choice="heads or tails", user="Opponent (optional)")
 async def cf(interaction: discord.Interaction, amount: int, choice: str, user: discord.User | None = None):
     choice = choice.lower()
@@ -500,7 +500,7 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str, user: d
         view=view
     )
 
-@bot.tree.command(name="lb", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="lb")
 async def leaderboard(interaction: discord.Interaction):
     if not data:
         return await interaction.response.send_message("No data yet.")
@@ -513,7 +513,7 @@ async def leaderboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 # ---------- CLAIM ----------
-@bot.tree.command(name="claim", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="claim")
 async def claim(interaction: discord.Interaction):
     user = get_user(interaction.user.id)
     if user["balance"] >= 1000:
@@ -532,17 +532,6 @@ async def claim(interaction: discord.Interaction):
     user["last_claim"] = now.isoformat()
     save_data()
     await interaction.response.send_message("🎉 You claimed **1000 dabloons**!", ephemeral=True)
-
-# ---------- SYNC ----------
-@bot.tree.command(name="sync", guild=discord.Object(id=GUILD_ID))
-async def wipe(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("Admins only.", ephemeral=True)
-
-    bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
-    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-
-    await interaction.response.send_message("🧹 All guild slash commands wiped.", ephemeral=True)
 
 # ---------- READY ----------
 @bot.event
