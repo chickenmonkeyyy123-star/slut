@@ -258,7 +258,7 @@ class BlackjackView(View):
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
 # ---------- LIMBO ----------
-@bot.tree.command(name="limbo")
+@bot.tree.command(name="limbo", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     amount="Bet amount",
     multiplier="Target multiplier (2, 3, 4, 5, etc — no decimals)",
