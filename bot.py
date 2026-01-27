@@ -46,20 +46,26 @@ def get_user(uid):
             "balance": START_BALANCE,
             "blackjack": {"wins": 0, "losses": 0},
             "coinflip": {"wins": 0, "losses": 0},
-            "chicken": {"wins": 0, "losses": 0},
+            "chicken": {"wins": 0, "losses": 0},  # new users get chicken
         }
         save_data()
 
-    # Safety: in case existing users don't have chicken stats
+    # Ensure all users have chicken stats, even old users
     data[uid].setdefault("chicken", {"wins": 0, "losses": 0})
 
     return data[uid]
 
 def total_wl(u):
+    # Use .get with default to avoid KeyErrors
     return (
-        u["blackjack"]["wins"] + u["coinflip"]["wins"] + u["chicken"]["wins"],
-        u["blackjack"]["losses"] + u["coinflip"]["losses"] + u["chicken"]["losses"],
+        u.get("blackjack", {}).get("wins", 0)
+        + u.get("coinflip", {}).get("wins", 0)
+        + u.get("chicken", {}).get("wins", 0),
+        u.get("blackjack", {}).get("losses", 0)
+        + u.get("coinflip", {}).get("losses", 0)
+        + u.get("chicken", {}).get("losses", 0),
     )
+
 
 
 # ---------- BLACKJACK ----------
@@ -564,6 +570,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
