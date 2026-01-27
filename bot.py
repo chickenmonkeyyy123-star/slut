@@ -482,7 +482,6 @@ async def chicken(interaction: discord.Interaction, amount: int):
     view = ChickenView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
----------- TIP COMMAND ----------
 
 @bot.tree.command(name="tip", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
