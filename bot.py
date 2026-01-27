@@ -404,6 +404,8 @@ class ChickenView(View):
 # ==========================================
 
 
+import random
+
 RANKS = "23456789TJQKA"
 SUITS = "♠♥♦♣"
 
@@ -438,8 +440,9 @@ class PokerGame:
         self.players = players
         self.active = players.copy()
         self.buyin = buyin
-        self.pot = buyin * len(players)
+        self.contributions = {p.id: buyin for p in players}
 
+        self.pot = buyin * len(players)
         self.deck = new_deck()
         random.shuffle(self.deck)
 
@@ -455,11 +458,12 @@ class PokerGame:
         elif self.round in (2,3):
             self.board.append(self.deck.pop())
 
-
+import discord
+from discord.ui import View
 
 class PokerView(View):
     def __init__(self, game, channel):
-        super().__init__(timeout=120)
+        super().__init__(timeout=180)
         self.game = game
         self.channel = channel
 
@@ -474,11 +478,12 @@ class PokerView(View):
                 f"💰 Pot: {self.game.pot}\n"
                 f"➡️ Turn: {self.current().mention}"
             ),
-            color=discord.Color.dark_gold()
+            color=discord.Color.gold()
         )
 
     async def next_turn(self):
         self.game.turn += 1
+
         if self.game.turn % len(self.game.active) == 0:
             self.game.deal_next()
 
@@ -488,21 +493,34 @@ class PokerView(View):
             await self.channel.send(embed=self.embed(), view=self)
 
     async def finish(self):
-        ranks = {p.id: hand_rank(self.game.hands[p.id] + self.game.board)
-                 for p in self.game.active}
+        ranks = {
+            p.id: hand_rank(self.game.hands[p.id] + self.game.board)
+            for p in self.game.active
+        }
 
         best = max(ranks.values())
         winners = [p for p in self.game.active if ranks[p.id] == best]
         payout = self.game.pot // len(winners)
 
+        # Pay winners
         for w in winners:
             get_user(w.id)["balance"] += payout
 
         save_data()
 
+        # Show results + profit
         desc = f"🃏 Board: {' '.join(self.game.board)}\n\n"
+
         for p in self.game.players:
-            desc += f"{p.mention}: {' '.join(self.game.hands[p.id])}\n"
+            spent = self.game.contributions[p.id]
+            earned = payout if p in winners else 0
+            profit = earned - spent
+
+            sign = "+" if profit >= 0 else ""
+            desc += (
+                f"{p.mention}: {' '.join(self.game.hands[p.id])}\n"
+                f"💵 **{sign}{profit} dabloons**\n\n"
+            )
 
         await self.channel.send(
             embed=discord.Embed(
@@ -512,6 +530,7 @@ class PokerView(View):
             )
         )
         self.stop()
+
 
     @discord.ui.button(label="Check / Call", style=discord.ButtonStyle.green)
     async def call(self, interaction, _):
@@ -531,6 +550,9 @@ class PokerView(View):
 
         u["balance"] -= self.game.buyin
         self.game.pot += self.game.buyin
+        self.game.contributions[interaction.user.id] += self.game.buyin
+
+        save_data()
         await interaction.response.defer()
         await self.next_turn()
 
@@ -542,29 +564,6 @@ class PokerView(View):
         self.game.active.remove(interaction.user)
         await interaction.response.defer()
         await self.next_turn()
-
-
-class PokerInvite(View):
-    def __init__(self, players):
-        super().__init__(timeout=60)
-        self.players = players
-        self.accepted = set()
-        self.message = None
-
-    @discord.ui.button(label="✅ Accept Poker", style=discord.ButtonStyle.green)
-    async def accept(self, interaction, _):
-        if interaction.user not in self.players:
-            return await interaction.response.send_message("Not invited.", ephemeral=True)
-
-        self.accepted.add(interaction.user.id)
-        await interaction.response.send_message("Accepted!", ephemeral=True)
-
-        if len(self.accepted) == len(self.players):
-            for c in self.children:
-                c.disabled = True
-            await self.message.edit(view=self)
-            self.stop()
-
 
 
 
@@ -798,18 +797,9 @@ async def poker(interaction: discord.Interaction, amount: int,
         get_user(p.id)["balance"] -= amount
     save_data()
 
-    invite = PokerInvite(players)
-    await interaction.response.send_message(
-        f"♠️ **Poker Invite**\nBuy-in: **{amount}**\nPlayers: {', '.join(p.mention for p in players)}",
-        view=invite
-    )
-
-    invite.message = await interaction.original_response()
-    await invite.wait()
-
     game = PokerGame(players, amount)
 
-    # 🔒 SEND HANDS PRIVATELY (DM)
+    # 🔒 Send hands via DM
     for p in players:
         await p.send(
             embed=discord.Embed(
@@ -820,7 +810,8 @@ async def poker(interaction: discord.Interaction, amount: int,
         )
 
     view = PokerView(game, interaction.channel)
-    await interaction.channel.send(embed=view.embed(), view=view)
+    await interaction.response.send_message(embed=view.embed(), view=view)
+
 
 
 
@@ -836,6 +827,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
