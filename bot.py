@@ -50,6 +50,7 @@ def get_user(uid):
             "blackjack": {"wins": 0, "losses": 0},
             "coinflip": {"wins": 0, "losses": 0},
             "limbo": {"wins": 0, "losses": 0},
+            "chicken": {"wins": 0, "losses": 0},
         }
         save_data()
         return data[uid]
@@ -61,6 +62,7 @@ def get_user(uid):
     u.setdefault("blackjack", {"wins": 0, "losses": 0})
     u.setdefault("coinflip", {"wins": 0, "losses": 0})
     u.setdefault("limbo", {"wins": 0, "losses": 0})
+    u.setdefault("chicken", {"wins": 0, "losses": 0})
 
     save_data()
     return u
@@ -69,10 +71,12 @@ def total_wl(u):
     return (
         u.get("blackjack", {}).get("wins", 0)
         + u.get("coinflip", {}).get("wins", 0)
-        + u.get("limbo", {}).get("wins", 0),
+        + u.get("limbo", {}).get("wins", 0)
+        + u.get("chicken", {}).get("wins", 0),
         u.get("blackjack", {}).get("losses", 0)
         + u.get("coinflip", {}).get("losses", 0)
-        + u.get("limbo", {}).get("losses", 0),
+        + u.get("limbo", {}).get("losses", 0)
+        + u.get("chicken", {}).get("losses", 0),
     )
 
 # ---------- BLACKJACK ----------
@@ -309,7 +313,7 @@ async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
     save_data()
     await interaction.response.send_message(msg)
 
-# ---------- CHICKEN (FIXED MANUAL BOOST) ----------
+# ---------- CHICKEN (BOOST FIXED TO 0.5) ----------
 class ChickenGame:
     def __init__(self, bet):
         self.bet = bet
@@ -320,7 +324,7 @@ class ChickenGame:
     def boost(self):
         if self.finished:
             return False
-        self.multiplier += 0.1
+        self.multiplier += 0.5  # <- FIXED HERE
         if self.multiplier >= self.crash:
             self.finished = True
             return False
@@ -361,7 +365,6 @@ class ChickenView(View):
         else:
             u = get_user(self.user.id)
             u["balance"] -= self.game.bet
-            u.setdefault("chicken", {"wins": 0, "losses": 0})
             u["chicken"]["losses"] += 1
             save_data()
             self.active = False
@@ -381,7 +384,6 @@ class ChickenView(View):
         winnings = self.game.cashout()
         u = get_user(self.user.id)
         u["balance"] += int(winnings)
-        u.setdefault("chicken", {"wins": 0, "losses": 0})
         u["chicken"]["wins"] += 1
         save_data()
 
@@ -434,40 +436,6 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     save_data()
     await interaction.response.send_message(msg)
 
-# ---------- CLAIM ----------
-@bot.tree.command(name="claim", guild=discord.Object(id=GUILD_ID))
-async def claim(interaction: discord.Interaction):
-    u = get_user(interaction.user.id)
-    now = datetime.utcnow()
-
-    last_claim = u.get("last_claim")
-    if last_claim:
-        last_claim_dt = datetime.fromisoformat(last_claim)
-        if now - last_claim_dt < timedelta(hours=24):
-            remaining = timedelta(hours=24) - (now - last_claim_dt)
-            return await interaction.response.send_message(
-                f"⏳ You already claimed today. Come back in {str(remaining).split('.')[0]}.",
-                ephemeral=True,
-            )
-
-    u["balance"] += 500
-    u["last_claim"] = now.isoformat()
-    save_data()
-    await interaction.response.send_message("💰 You claimed 500 dabloons!")
-
-# ---------- GIVEAWAY (SIMPLE) ----------
-@bot.tree.command(name="giveaway", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(amount="Amount to giveaway")
-async def giveaway(interaction: discord.Interaction, amount: int):
-    u = get_user(interaction.user.id)
-
-    if amount <= 0 or amount > u["balance"]:
-        return await interaction.response.send_message("❌ Invalid amount.", ephemeral=True)
-
-    u["balance"] -= amount
-    save_data()
-    await interaction.response.send_message(f"🎉 {amount} dabloons added to the giveaway pool!")
-
 # ---------- LEADERBOARD ----------
 @bot.tree.command(name="leaderboard", guild=discord.Object(id=GUILD_ID))
 async def leaderboard(interaction: discord.Interaction):
@@ -490,4 +458,3 @@ async def on_ready():
 
 # ---------- RUN BOT ----------
 bot.run(TOKEN)
-
