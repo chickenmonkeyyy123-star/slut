@@ -6,8 +6,6 @@ import random
 import json
 import os
 from dotenv import load_dotenv
-import asyncio
-from datetime import datetime, timedelta
 
 # ---------- LOAD .ENV ----------
 load_dotenv()
@@ -61,10 +59,9 @@ def house_transfer(amount):
     house["balance"] += amount
 
 def total_wl(u):
-    return (
-        sum(v.get("wins", 0) for v in u.values() if isinstance(v, dict)),
-        sum(v.get("losses", 0) for v in u.values() if isinstance(v, dict)),
-    )
+    wins = sum(v["wins"] for v in u.values() if isinstance(v, dict))
+    losses = sum(v["losses"] for v in u.values() if isinstance(v, dict))
+    return wins, losses
 
 # ---------- BLACKJACK ----------
 class BlackjackGame:
@@ -74,7 +71,6 @@ class BlackjackGame:
         random.shuffle(self.deck)
         self.player = [self.deck.pop(), self.deck.pop()]
         self.dealer = [self.deck.pop(), self.deck.pop()]
-        self.finished = False
 
     def new_deck(self):
         suits = ["♠", "♥", "♦", "♣"]
@@ -101,15 +97,19 @@ class BlackjackView(View):
         self.user = user
 
     def embed(self, reveal=False):
-        dealer = "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}" if not reveal else ", ".join(
-            f"{c['r']}{c['s']}" for c in self.game.dealer
-        )
+        player_hand = ", ".join(f"{c['r']}{c['s']}" for c in self.game.player)
+
+        if reveal:
+            dealer_hand = ", ".join(f"{c['r']}{c['s']}" for c in self.game.dealer)
+        else:
+            dealer_hand = f"?, {self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
+
         return discord.Embed(
             title="🃏 Blackjack",
             description=(
-                f"**Your Hand:** {', '.join(f'{c['r']}{c['s']}' for c in self.game.player)} "
+                f"**Your Hand:** {player_hand} "
                 f"(Value {self.game.value(self.game.player)})\n"
-                f"**Dealer:** {dealer}"
+                f"**Dealer:** {dealer_hand}"
             ),
             color=discord.Color.blurple()
         )
@@ -164,8 +164,7 @@ async def bj(interaction: discord.Interaction, amount: int):
 
 # ---------- COINFLIP ----------
 @bot.tree.command(name="cf")
-@app_commands.describe(amount="Bet", choice="heads or tails", user="Opponent (optional)")
-async def cf(interaction: discord.Interaction, amount: int, choice: str, user: discord.User | None = None):
+async def cf(interaction: discord.Interaction, amount: int, choice: str):
     choice = choice.lower()
     u = get_user(interaction.user.id)
 
@@ -176,19 +175,19 @@ async def cf(interaction: discord.Interaction, amount: int, choice: str, user: d
 
     flip = random.choice(["heads", "tails"])
 
-    if not user:
-        if flip == choice:
-            u["balance"] += amount
-            u["coinflip"]["wins"] += 1
-            house_transfer(-amount)
-            msg = f"🪙 **{flip.upper()}** — You won {amount}"
-        else:
-            u["balance"] -= amount
-            u["coinflip"]["losses"] += 1
-            house_transfer(amount)
-            msg = f"🪙 **{flip.upper()}** — You lost {amount}"
-        save_data()
-        return await interaction.response.send_message(msg)
+    if flip == choice:
+        u["balance"] += amount
+        u["coinflip"]["wins"] += 1
+        house_transfer(-amount)
+        msg = f"🪙 **{flip.upper()}** — You won {amount}"
+    else:
+        u["balance"] -= amount
+        u["coinflip"]["losses"] += 1
+        house_transfer(amount)
+        msg = f"🪙 **{flip.upper()}** — You lost {amount}"
+
+    save_data()
+    await interaction.response.send_message(msg)
 
 # ---------- LIMBO ----------
 @bot.tree.command(name="limbo")
@@ -265,6 +264,7 @@ async def lb(interaction: discord.Interaction):
     for i, (uid, u) in enumerate(sorted_users[:10], start=1):
         w, l = total_wl(u)
         lines.append(f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏆 {w} ❌ {l}")
+
     await interaction.response.send_message(
         embed=discord.Embed(title="🏆 Leaderboard", description="\n".join(lines))
     )
