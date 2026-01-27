@@ -272,6 +272,94 @@ class BlackjackView(View):
         self.game.split()
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
+# ---------- CHICKEN GAME ----------
+class ChickenGame:
+    def __init__(self, bet):
+        self.bet = bet
+        self.multiplier = 1
+        self.crash = random.randint(10, 100) / 10  # random crash between 1.0x and 10.0x
+        self.finished = False
+
+    def advance(self):
+        if self.finished:
+            return
+
+        self.multiplier += 1  # increment multiplier each tick
+        if self.multiplier >= self.crash:
+            self.finished = True
+            return False  # crashed
+        return True  # still alive
+
+    def cashout(self):
+        self.finished = True
+        return self.bet * self.multiplier
+
+
+class ChickenView(View):
+    def __init__(self, game, user):
+        super().__init__(timeout=60)
+        self.game = game
+        self.user = user
+        self.active = True
+
+    def embed(self):
+        return discord.Embed(
+            title="🐔 Chicken Game",
+            description=(
+                f"💰 Bet: {self.game.bet}\n"
+                f"🚀 Multiplier: {self.game.multiplier}x\n"
+                f"⚠️ Crash at: ??? (shh, secret!)"
+            ),
+            color=discord.Color.orange(),
+        )
+
+    @discord.ui.button(label="Cash Out", style=discord.ButtonStyle.green)
+    async def cashout(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message(
+                "Not your game!", ephemeral=True
+            )
+        if not self.active:
+            return
+
+        winnings = self.game.cashout()
+        u = get_user(self.user.id)
+        u["balance"] += int(winnings)
+        u.setdefault("chicken", {"wins": 0, "losses": 0})
+        u["chicken"]["wins"] += 1
+        save_data()
+
+        self.active = False
+        self.stop()
+        await interaction.response.edit_message(
+            content=f"🏆 You cashed out at **{self.game.multiplier}x** and won **{int(winnings)} dabloons!**",
+            embed=None, view=None
+        )
+
+    async def run_game(self, message):
+        u = get_user(self.user.id)
+        u.setdefault("chicken", {"wins": 0, "losses": 0})
+
+        while self.active and not self.game.finished:
+            await asyncio.sleep(1)  # one tick per second
+            alive = self.game.advance()
+            if alive:
+                await message.edit(embed=self.embed(), view=self)
+            else:
+                # Chicken crashed
+                u["balance"] -= self.game.bet
+                u["chicken"]["losses"] += 1
+                save_data()
+                self.active = False
+                self.stop()
+                await message.edit(
+                    content=f"💥 Chicken crashed at **{self.game.multiplier}x**! You lost **{self.game.bet} dabloons**.",
+                    embed=None,
+                    view=None
+                )
+                break
+
+
 # ---------- LIMBO ----------
 
 @bot.tree.command(name="limbo", guild=discord.Object(id=GUILD_ID))
@@ -465,6 +553,27 @@ async def leaderboard(interaction: discord.Interaction):
         color=discord.Color.gold(),
     )
     await interaction.response.send_message(embed=embed)
+
+    # ---------- CHICKEN COMMAND ----------
+@bot.tree.command(name="chicken", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Bet amount")
+async def chicken(interaction: discord.Interaction, amount: int):
+    u = get_user(interaction.user.id)
+
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message(
+            "❌ Invalid bet.", ephemeral=True
+        )
+
+    game = ChickenGame(amount)
+    view = ChickenView(game, interaction.user)
+    await interaction.response.send_message(embed=view.embed(), view=view)
+    message = await interaction.original_response()
+
+    # Run game loop
+    await view.run_game(message)
+
+
 
 # ---------- GIVEAWAY ----------
 class GiveawayView(View):
