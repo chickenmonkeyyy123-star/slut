@@ -1,32 +1,34 @@
+import os
+import json
+import random
+import asyncio
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import View, Button
-import random
-import json
-import os
-from dotenv import load_dotenv
-import asyncio
-from datetime import datetime, timedelta
 
-# ---------- LOAD .ENV ----------
+# ==========================================
+# ---------- CONFIGURATION & LOAD ----------
+# ==========================================
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN not found in .env")
 
-# ---------- CONFIG ----------
 DATA_FILE = "dabloon_data.json"
 MAX_CHICKEN_BET = 15000
 MAX_LIMBO_MULTIPLIER = 100
 START_BALANCE = 1000
 GUILD_ID = 1332118870181412936
 
-# ---------- BOT ----------
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
+# ==========================================
+# ---------- DATA CORE FUNCTIONS -----------
+# ==========================================
 
-# ---------- DATA ----------
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
@@ -47,28 +49,41 @@ def get_user(uid):
             "blackjack": {"wins": 0, "losses": 0},
             "coinflip": {"wins": 0, "losses": 0},
             "chicken": {"wins": 0, "losses": 0},
+            "limbo": {"wins": 0, "losses": 0}, # Added for logic consistency
         }
         save_data()
+
+    # Ensure all users have necessary stats for all games
     data[uid].setdefault("chicken", {"wins": 0, "losses": 0})
     data[uid].setdefault("limbo", {"wins": 0, "losses": 0})
+
     return data[uid]
 
 def total_wl(u):
-    return (
+    wins = (
         u.get("blackjack", {}).get("wins", 0) +
         u.get("coinflip", {}).get("wins", 0) +
-        u.get("chicken", {}).get("wins", 0),
+        u.get("chicken", {}).get("wins", 0) +
+        u.get("limbo", {}).get("wins", 0)
+    )
+    losses = (
         u.get("blackjack", {}).get("losses", 0) +
         u.get("coinflip", {}).get("losses", 0) +
-        u.get("chicken", {}).get("losses", 0),
+        u.get("chicken", {}).get("losses", 0) +
+        u.get("limbo", {}).get("losses", 0)
     )
+    return wins, losses
 
-# ---------- BLACKJACK ----------
+# ==========================================
+# ---------- BLACKJACK GAME LOGIC ----------
+# ==========================================
+
 class BlackjackGame:
     def __init__(self, bet):
         self.base_bet = bet
         self.deck = self.new_deck()
         random.shuffle(self.deck)
+
         self.hands = [[self.deck.pop(), self.deck.pop()]]
         self.bets = [bet]
         self.finished = [False]
@@ -78,11 +93,11 @@ class BlackjackGame:
 
     def new_deck(self):
         suits = ["♠", "♥", "♦", "♣"]
-        ranks = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"]
+        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         deck = []
         for s in suits:
             for r in ranks:
-                v = 11 if r == "A" else 10 if r in ["J","Q","K"] else int(r)
+                v = 11 if r == "A" else 10 if r in ["J", "Q", "K"] else int(r)
                 deck.append({"r": r, "s": s, "v": v})
         return deck
 
@@ -147,10 +162,12 @@ class BlackjackView(View):
                 f"{pointer}**Hand {i+1}:** {self.game.fmt(hand)} "
                 f"(Value: {self.game.value(hand)}) | Bet: {self.game.bets[i]}\n"
             )
+
         dealer = (
             "?, " + f"{self.game.dealer[1]['r']}{self.game.dealer[1]['s']}"
             if hide_dealer else self.game.fmt(self.game.dealer)
         )
+
         return discord.Embed(
             title="🃏 Blackjack",
             description=f"{desc}\n**Dealer:** {dealer}",
@@ -168,11 +185,14 @@ class BlackjackView(View):
         self.game.dealer_play()
         dv = self.game.value(self.game.dealer)
         u = get_user(self.user.id)
+
         embed = self.embed(hide_dealer=False)
         result = ""
+
         for i, hand in enumerate(self.game.hands):
             pv = self.game.value(hand)
             bet = self.game.bets[i]
+
             if pv > 21:
                 u["balance"] -= bet
                 u["blackjack"]["losses"] += 1
@@ -187,6 +207,7 @@ class BlackjackView(View):
                 result += f"❌ Hand {i+1} loses\n"
             else:
                 result += f"➖ Hand {i+1} push\n"
+
         embed.description += "\n" + result
         save_data()
         self.stop()
@@ -229,7 +250,10 @@ class BlackjackView(View):
         self.game.split()
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
-# ---------- COINFLIP ----------
+# ==========================================
+# ---------- COINFLIP COMPONENTS -----------
+# ==========================================
+
 class CoinflipView(View):
     def __init__(self, challenger, opponent, amount, choice):
         super().__init__(timeout=60)
@@ -245,9 +269,11 @@ class CoinflipView(View):
             return await interaction.response.send_message("You are not the opponent.", ephemeral=True)
         if self.result_sent:
             return
+
         flip = random.choice(["heads", "tails"])
         u = get_user(self.challenger.id)
         o = get_user(self.opponent.id)
+
         if flip == self.choice:
             u["balance"] += self.amount
             o["balance"] -= self.amount
@@ -260,12 +286,16 @@ class CoinflipView(View):
             u["coinflip"]["losses"] += 1
             o["coinflip"]["wins"] += 1
             msg = f"🪙 **{flip.upper()}** — {self.opponent.mention} won **{self.amount}**!"
+
         save_data()
         self.result_sent = True
         self.stop()
         await interaction.response.edit_message(content=msg, view=None)
 
-# ---------- GIVEAWAY ----------
+# ==========================================
+# ---------- GIVEAWAY COMPONENTS -----------
+# ==========================================
+
 class GiveawayView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -279,63 +309,10 @@ class GiveawayView(View):
         self.entries.add(interaction.user.id)
         await interaction.response.send_message("✅ You have entered the giveaway!", ephemeral=True)
 
-@bot.tree.command(name="giveaway")
-@app_commands.describe(
-    amount="Dabloons per winner",
-    duration="Duration in seconds",
-    winners="Number of winners"
-)
-async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Only server admins can start a giveaway.", ephemeral=True)
-    if amount <= 0 or duration <= 0 or winners <= 0:
-        return await interaction.response.send_message("❌ Amount, duration, and winners must be positive numbers.", ephemeral=True)
-    view = GiveawayView()
-    embed = discord.Embed(
-        title="🎉 Dabloons Giveaway!",
-        description=f"💰 **{amount} dabloons** per winner\n👑 **{winners} winner(s)**\n⏰ Ends in **{duration} seconds**\n\nClick 🎉 below to enter!",
-        color=discord.Color.gold()
-    )
-    await interaction.response.send_message(embed=embed, view=view)
-    message = await interaction.original_response()
-    await asyncio.sleep(duration)
-    if not view.entries:
-        return await message.reply("❌ Giveaway ended — no one entered.")
-    selected = random.sample(list(view.entries), k=min(winners, len(view.entries)))
-    mentions = []
-    for user_id in selected:
-        get_user(user_id)["balance"] += amount
-        save_data()
-        mentions.append(f"<@{user_id}>")
-    await message.reply(f"🎊 **GIVEAWAY ENDED!**\n🏆 Winner(s): {', '.join(mentions)}\n💰 Each winner received **{amount} dabloons**!")
+# ==========================================
+# ---------- CHICKEN GAME LOGIC ------------
+# ==========================================
 
-# ---------- LIMBO ----------
-@bot.tree.command(name="limbo", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    amount="Bet amount",
-    multiplier="Target multiplier (2–100)",
-)
-async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
-    u = get_user(interaction.user.id)
-    if amount <= 0 or amount > u["balance"]:
-        return await interaction.response.send_message("❌ Invalid bet amount.", ephemeral=True)
-    if multiplier < 2 or multiplier > MAX_LIMBO_MULTIPLIER:
-        return await interaction.response.send_message(f"❌ Multiplier must be between **2x** and **{MAX_LIMBO_MULTIPLIER}x**.", ephemeral=True)
-    win_chance = 1 / multiplier
-    roll = random.random()
-    if roll <= win_chance:
-        profit = amount * (multiplier - 1)
-        u["balance"] += profit
-        u["limbo"]["wins"] += 1
-        msg = f"🚀 **LIMBO WIN!**\n🎯 Target: **{multiplier}x**\n💰 Profit: **+{profit} dabloons**"
-    else:
-        u["balance"] -= amount
-        u["limbo"]["losses"] += 1
-        msg = f"💥 **LIMBO CRASHED!**\n🎯 Target: **{multiplier}x**\n💸 Lost: **-{amount} dabloons**"
-    save_data()
-    await interaction.response.send_message(msg)
-
-# ---------- CHICKEN GAME ----------
 class ChickenGame:
     def __init__(self, bet):
         self.bet = bet
@@ -371,7 +348,7 @@ class ChickenView(View):
                 f"🚀 Multiplier: **{self.game.multiplier:.1f}x**\n"
                 f"⚠️ Crash at: **???**"
             ),
-            color=discord.Color.orange()
+            color=discord.Color.orange(),
         )
 
     @discord.ui.button(label="⬆️ Boost", style=discord.ButtonStyle.green)
@@ -380,7 +357,9 @@ class ChickenView(View):
             return await interaction.response.send_message("Not your game.", ephemeral=True)
         if not self.active:
             return
+
         alive = self.game.boost()
+
         if alive:
             await interaction.response.edit_message(embed=self.embed(), view=self)
         else:
@@ -388,11 +367,13 @@ class ChickenView(View):
             u["balance"] -= self.game.bet
             u["chicken"]["losses"] += 1
             save_data()
+
             self.active = False
             self.stop()
             await interaction.response.edit_message(
                 content=f"💥 **CRASHED at {self.game.multiplier:.1f}x** — You lost **{self.game.bet} dabloons**.",
-                embed=None, view=None
+                embed=None,
+                view=None
             )
 
     @discord.ui.button(label="💰 Cash Out", style=discord.ButtonStyle.blurple)
@@ -401,96 +382,238 @@ class ChickenView(View):
             return await interaction.response.send_message("Not your game.", ephemeral=True)
         if not self.active:
             return
+
         winnings = self.game.cashout()
         u = get_user(self.user.id)
         u["balance"] += winnings
         u["chicken"]["wins"] += 1
         save_data()
+
         self.active = False
         self.stop()
         await interaction.response.edit_message(
             content=f"🏆 **Cashed out at {self.game.multiplier:.1f}x** — You won **{winnings} dabloons!**",
-            embed=None, view=None
+            embed=None,
+            view=None
         )
+
+# ==========================================
+# ---------- BOT INITIALIZATION ------------
+# ==========================================
+
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ==========================================
+# ---------- TREE SLASH COMMANDS -----------
+# ==========================================
+
+@bot.tree.command(name="bj")
+async def bj(interaction: discord.Interaction, amount: int):
+    u = get_user(interaction.user.id)
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message("Invalid bet.", ephemeral=True)
+    game = BlackjackGame(amount)
+    view = BlackjackView(game, interaction.user)
+    await interaction.response.send_message(embed=view.embed(), view=view)
+
+@bot.tree.command(name="cf")
+@app_commands.describe(amount="Bet", choice="heads or tails", user="Opponent (optional)")
+async def cf(interaction: discord.Interaction, amount: int, choice: str, user: discord.User | None = None):
+    choice = choice.lower()
+    u = get_user(interaction.user.id)
+
+    if choice not in ["heads", "tails"]:
+        return await interaction.response.send_message("heads or tails only.", ephemeral=True)
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message("Invalid bet.", ephemeral=True)
+    if user and user.id == interaction.user.id:
+        return await interaction.response.send_message("You can't coinflip yourself.", ephemeral=True)
+
+    if not user:
+        flip = random.choice(["heads", "tails"])
+        if flip == choice:
+            u["balance"] += amount
+            u["coinflip"]["wins"] += 1
+            msg = f"🪙 **{flip.upper()}** — You won **{amount}**!"
+        else:
+            u["balance"] -= amount
+            u["coinflip"]["losses"] += 1
+            msg = f"🪙 **{flip.upper()}** — You lost **{amount}**."
+        save_data()
+        return await interaction.response.send_message(msg)
+
+    opponent = get_user(user.id)
+    if opponent["balance"] < amount:
+        return await interaction.response.send_message(f"{user.mention} doesn't have enough balance.", ephemeral=True)
+
+    view = CoinflipView(interaction.user, user, amount, choice)
+    await interaction.response.send_message(
+        f"🪙 **Coinflip Challenge**\n{interaction.user.mention} vs {user.mention}\n"
+        f"Bet: **{amount} dabloons**\n{user.mention}, click **Accept Coinflip**",
+        view=view
+    )
+
+@bot.tree.command(name="giveaway")
+@app_commands.describe(amount="Dabloons per winner", duration="Duration in seconds", winners="Number of winners")
+async def giveaway(interaction: discord.Interaction, amount: int, duration: int, winners: int):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Only server admins can start a giveaway.", ephemeral=True)
+    if amount <= 0 or duration <= 0 or winners <= 0:
+        return await interaction.response.send_message("❌ Amount, duration, and winners must be positive numbers.", ephemeral=True)
+    
+    view = GiveawayView()
+    embed = discord.Embed(
+        title="🎉 Dabloons Giveaway!",
+        description=f"💰 **{amount} dabloons** per winner\n👑 **{winners} winner(s)**\n⏰ Ends in **{duration} seconds**\n\nClick 🎉 below to enter!",
+        color=discord.Color.gold()
+    )
+    await interaction.response.send_message(embed=embed, view=view)
+    message = await interaction.original_response()
+    await asyncio.sleep(duration)
+    
+    if not view.entries:
+        return await message.reply("❌ Giveaway ended — no one entered.")
+        
+    selected = random.sample(list(view.entries), k=min(winners, len(view.entries)))
+    mentions = []
+    for user_id in selected:
+        get_user(user_id)["balance"] += amount
+        save_data()
+        mentions.append(f"<@{user_id}>")
+    await message.reply(f"🎊 **GIVEAWAY ENDED!**\n🏆 Winner(s): {', '.join(mentions)}\n💰 Each winner received **{amount} dabloons**!")
+
+@bot.tree.command(name="limbo", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Bet amount", multiplier="Target multiplier (2–100)")
+async def limbo(interaction: discord.Interaction, amount: int, multiplier: int):
+    u = get_user(interaction.user.id)
+
+    if amount <= 0 or amount > u["balance"]:
+        return await interaction.response.send_message("❌ Invalid bet amount.", ephemeral=True)
+
+    if multiplier < 2 or multiplier > MAX_LIMBO_MULTIPLIER:
+        return await interaction.response.send_message(f"❌ Multiplier must be between **2x** and **{MAX_LIMBO_MULTIPLIER}x**.", ephemeral=True)
+
+    win_chance = 1 / multiplier
+    roll = random.random()
+
+    if roll <= win_chance:
+        profit = amount * (multiplier - 1)
+        u["balance"] += profit
+        u["limbo"]["wins"] += 1
+        msg = (
+            f"🚀 **LIMBO WIN!**\n"
+            f"🎯 Target: **{multiplier}x**\n"
+            f"💰 Profit: **+{profit} dabloons**"
+        )
+    else:
+        u["balance"] -= amount
+        u["limbo"]["losses"] += 1
+        msg = (
+            f"💥 **LIMBO CRASHED!**\n"
+            f"🎯 Target: **{multiplier}x**\n"
+            f"💸 Lost: **-{amount} dabloons**"
+        )
+
+    save_data()
+    await interaction.response.send_message(msg)
 
 @bot.tree.command(name="chicken", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(amount="Bet amount")
 async def chicken(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
+
     if amount <= 0:
         return await interaction.response.send_message("❌ Invalid bet.", ephemeral=True)
+
     if amount > MAX_CHICKEN_BET:
         return await interaction.response.send_message(f"❌ Max Chicken bet is **{MAX_CHICKEN_BET} dabloons**.", ephemeral=True)
-    if amount > u["balance"]:
-        return await interaction.response.send_message("❌ You don't have enough balance.",
 
-           ephemeral=True)
+    if amount > u["balance"]:
+        return await interaction.response.send_message("❌ You don't have enough balance.", ephemeral=True)
+
     game = ChickenGame(amount)
     view = ChickenView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
-    
 
-# ---------- CLAIM ---------- (1000 dabloons per hour)
-@bot.tree.command(name="claim", guild=discord.Object(id=GUILD_ID))
-async def claim(interaction: discord.Interaction):
-    u = get_user(interaction.user.id)
-    last_claim = u.get("last_claim")
-    now = datetime.utcnow()
-    if last_claim:
-        last = datetime.fromisoformat(last_claim)
-        if now - last < timedelta(hours=1):
-            remaining = timedelta(hours=1) - (now - last)
-            mins, secs = divmod(int(remaining.total_seconds()), 60)
-            return await interaction.response.send_message(
-                f"⏳ You can claim again in {mins}m {secs}s.", ephemeral=True
-            )
-    if u["balance"] < START_BALANCE:
-        u["balance"] = START_BALANCE
-    else:
-        u["balance"] += 1000
-    u["last_claim"] = now.isoformat()
-    save_data()
-    await interaction.response.send_message("✅ You claimed **1000 dabloons**!", ephemeral=True)
-
-# ---------- TIP ---------- (tip other users)
-@bot.tree.command(name="tip", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User to tip", amount="Amount of dabloons")
-async def tip(interaction: discord.Interaction, user: discord.User, amount: int):
-    if user.id == interaction.user.id:
-        return await interaction.response.send_message("❌ You cannot tip yourself.", ephemeral=True)
-    u = get_user(interaction.user.id)
-    t = get_user(user.id)
-    if amount <= 0 or amount > u["balance"]:
-        return await interaction.response.send_message("❌ Invalid amount.", ephemeral=True)
-    u["balance"] -= amount
-    t["balance"] += amount
-    save_data()
-    await interaction.response.send_message(f"💸 You tipped {user.mention} **{amount} dabloons**!")
-
-# ---------- LEADERBOARD ----------
-@bot.tree.command(name="lb", guild=discord.Object(id=GUILD_ID))
-async def lb(interaction: discord.Interaction):
-    sorted_users = sorted(data.items(), key=lambda x: x[1].get("balance", 0), reverse=True)[:15]
-    embed = discord.Embed(title="📊 Dabloons Leaderboard (Top 15)", color=discord.Color.green())
-    for i, (uid, udata) in enumerate(sorted_users, start=1):
-        wins, losses = total_wl(udata)
-        user = bot.get_user(int(uid))
-        uname = user.name if user else f"<@{uid}>"
-        embed.add_field(
-            name=f"{i}. {uname}",
-            value=f"💰 Balance: {udata['balance']}\n✅ Wins: {wins} | ❌ Losses: {losses}",
-            inline=False
-        )
+@bot.tree.command(name="lb")
+async def leaderboard(interaction: discord.Interaction):
+    if not data:
+        return await interaction.response.send_message("No data yet.")
+    sorted_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)
+    lines = []
+    for i, (uid, u) in enumerate(sorted_users[:10], start=1):
+        w, l = total_wl(u)
+        lines.append(f"**#{i}** <@{uid}> — 💰 {u['balance']} | 🏆 {w}W ❌ {l}L")
+    embed = discord.Embed(title="🏆 Leaderboard", description="\n".join(lines), color=discord.Color.gold())
     await interaction.response.send_message(embed=embed)
 
-# ---------- RUN BOT ----------
+@bot.tree.command(name="claim")
+async def claim(interaction: discord.Interaction):
+    user = get_user(interaction.user.id)
+    if user["balance"] >= 1000:
+        return await interaction.response.send_message("Balance too high to claim.", ephemeral=True)
+
+    now = datetime.utcnow()
+    last = user.get("last_claim")
+    if last:
+        last = datetime.fromisoformat(last)
+        if now - last < timedelta(hours=1):
+            remaining = timedelta(hours=1) - (now - last)
+            m, s = divmod(int(remaining.total_seconds()), 60)
+            return await interaction.response.send_message(f"⏳ Come back in {m}m {s}s.", ephemeral=True)
+
+    user["balance"] += 1000
+    user["last_claim"] = now.isoformat()
+    save_data()
+    await interaction.response.send_message("🎉 You claimed **1000 dabloons**!", ephemeral=True)
+
+
+
+@bot.tree.command(name="tip", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    amount="Amount of dabloons to tip",
+    user="User to tip"
+)
+async def tip(interaction: discord.Interaction, amount: int, user: discord.User):
+    if amount <= 0:
+        return await interaction.response.send_message(
+            "❌ Tip amount must be positive.",
+            ephemeral=True
+        )
+
+    if user.id == interaction.user.id:
+        return await interaction.response.send_message(
+            "❌ You can’t tip yourself.",
+            ephemeral=True
+        )
+
+    sender = get_user(interaction.user.id)
+    receiver = get_user(user.id)
+
+    if sender["balance"] < amount:
+        return await interaction.response.send_message(
+            "❌ You don’t have enough dabloons.",
+            ephemeral=True
+        )
+
+    sender["balance"] -= amount
+    receiver["balance"] += amount
+    save_data()
+
+    await interaction.response.send_message(
+        f"💸 **{interaction.user.mention} tipped {user.mention} `{amount}` dabloons!**"
+    )
+
+
+# ==========================================
+# ---------- BOT READY & STARTUP -----------
+# ==========================================
+
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}!")
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
+    guild = discord.Object(id=GUILD_ID)
+    await bot.tree.sync(guild=guild)
+    print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
