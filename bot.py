@@ -397,6 +397,118 @@ class ChickenView(View):
             view=None
         )
 
+
+
+# ==========================================
+# ---------- POKER GAME LOGIC ------------
+# ==========================================
+
+
+RANKS = "23456789TJQKA"
+SUITS = "♠♥♦♣"
+
+def new_deck():
+    return [r+s for r in RANKS for s in SUITS]
+
+def rank_value(r):
+    return RANKS.index(r)
+
+def hand_rank(hand):
+    ranks = sorted([rank_value(c[0]) for c in hand], reverse=True)
+    suits = [c[1] for c in hand]
+    counts = {r: ranks.count(r) for r in set(ranks)}
+
+    is_flush = len(set(suits)) == 1
+    is_straight = ranks == list(range(ranks[0], ranks[0]-5, -1))
+
+    if is_straight and is_flush:
+        return (8, ranks)
+    if 4 in counts.values():
+        return (7, ranks)
+    if sorted(counts.values()) == [2, 3]:
+        return (6, ranks)
+    if is_flush:
+        return (5, ranks)
+    if is_straight:
+        return (4, ranks)
+    if 3 in counts.values():
+        return (3, ranks)
+    if list(counts.values()).count(2) == 2:
+        return (2, ranks)
+    if 2 in counts.values():
+        return (1, ranks)
+    return (0, ranks)
+
+
+class PokerInviteView(View):
+    def __init__(self, host, players, amount):
+        super().__init__(timeout=60)
+        self.host = host
+        self.players = players
+        self.amount = amount
+        self.accepted = {host.id}
+
+    @discord.ui.button(label="✅ Accept Poker", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id not in [p.id for p in self.players]:
+            return await interaction.response.send_message("Not invited.", ephemeral=True)
+
+        self.accepted.add(interaction.user.id)
+        await interaction.response.send_message("✅ Accepted!", ephemeral=True)
+
+        if len(self.accepted) == len(self.players):
+            self.stop()
+            await start_poker_game(interaction, self.players, self.amount)
+
+async def start_poker_game(interaction, players, amount):
+    deck = new_deck()
+    random.shuffle(deck)
+
+    hands = {p.id: [deck.pop(), deck.pop()] for p in players}
+    dealer_hand = [deck.pop(), deck.pop()]
+
+    board = [deck.pop() for _ in range(5)]
+
+    pot = amount * len(players)
+
+    ranks = {}
+    for p in players:
+        cards = hands[p.id] + board
+        ranks[p.id] = hand_rank(cards)
+
+    dealer_rank = hand_rank(dealer_hand + board)
+
+    winners = [
+        p for p in players
+        if ranks[p.id] >= dealer_rank
+    ]
+
+    if winners:
+        split = pot // len(winners)
+        for w in winners:
+            get_user(w.id)["balance"] += split
+    else:
+        # Dealer wins → money removed
+        for p in players:
+            get_user(p.id)["balance"] -= amount
+
+    save_data()
+
+    desc = f"🃏 **Board:** {' '.join(board)}\n\n"
+    for p in players:
+        desc += f"{p.mention}: {' '.join(hands[p.id])}\n"
+
+    embed = discord.Embed(
+        title="♠️ Poker Results",
+        description=desc,
+        color=discord.Color.dark_gold()
+    )
+
+    await interaction.followup.send(embed=embed)
+
+
+
+
 # ==========================================
 # ---------- BOT INITIALIZATION ------------
 # ==========================================
@@ -606,6 +718,56 @@ async def tip(interaction: discord.Interaction, amount: int, user: discord.User)
     )
 
 
+
+@bot.tree.command(name="p", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    amount="Buy-in amount",
+    user1="Optional player",
+    user2="Optional player",
+    user3="Optional player"
+)
+async def poker(
+    interaction: discord.Interaction,
+    amount: int,
+    user1: discord.User | None = None,
+    user2: discord.User | None = None,
+    user3: discord.User | None = None
+):
+    users = [u for u in [user1, user2, user3] if u]
+    players = [interaction.user] + users
+
+    if len(players) > 4:
+        return await interaction.response.send_message("Max 4 players + AI dealer.", ephemeral=True)
+
+    for p in players:
+        if get_user(p.id)["balance"] < amount:
+            return await interaction.response.send_message(f"{p.mention} lacks balance.", ephemeral=True)
+
+    view = PokerInviteView(interaction.user, players, amount)
+
+    await interaction.response.send_message(
+        f"🃏 **Poker Game Invite**\n"
+        f"Buy-in: **{amount} dabloons**\n"
+        f"Players: {', '.join(p.mention for p in players)}\n\n"
+        f"Click **Accept Poker** to start!",
+        view=view
+    )
+
+
+
+@bot.tree.command(name="commands", guild=discord.Object(id=GUILD_ID))
+async def commands_cmd(interaction: discord.Interaction):
+    cmds = sorted(bot.tree.get_commands(), key=lambda c: c.name)
+    lines = [f"/{c.name} — {c.description or 'No description'}" for c in cmds]
+
+    embed = discord.Embed(
+        title="📜 Bot Commands",
+        description="\n".join(lines),
+        color=discord.Color.blurple()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 # ==========================================
 # ---------- BOT READY & STARTUP -----------
 # ==========================================
@@ -617,6 +779,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
