@@ -417,7 +417,6 @@ class ChickenView(View):
 # ---------- POKER GAME LOGIC ------------
 # ==========================================
 
-
 import random
 
 RANKS = "23456789TJQKA"
@@ -448,18 +447,15 @@ def hand_rank(cards):
     if 2 in freq: return (1, vals)
     return (0, vals)
 
-
 class PokerGame:
     def __init__(self, players, buyin):
         self.players = players
         self.active = players.copy()
         self.buyin = buyin
         self.contributions = {p.id: buyin for p in players}
-
         self.pot = buyin * len(players)
         self.deck = new_deck()
         random.shuffle(self.deck)
-
         self.hands = {p.id: [self.deck.pop(), self.deck.pop()] for p in players}
         self.board = []
         self.turn = 0
@@ -467,13 +463,13 @@ class PokerGame:
 
     def deal_next(self):
         self.round += 1
-        if self.round == 1:
+        if self.round == 1:  # Flop
             self.board += [self.deck.pop() for _ in range(3)]
-        elif self.round in (2,3):
+        elif self.round in (2, 3):  # Turn / River
             self.board.append(self.deck.pop())
 
 import discord
-from discord.ui import View
+from discord.ui import View, Button
 
 class PokerView(View):
     def __init__(self, game, channel):
@@ -507,11 +503,8 @@ class PokerView(View):
             await self.channel.send(embed=self.embed(), view=self)
 
     async def finish(self):
-        ranks = {
-            p.id: hand_rank(self.game.hands[p.id] + self.game.board)
-            for p in self.game.active
-        }
-
+        ranks = {p.id: hand_rank(self.game.hands[p.id] + self.game.board)
+                 for p in self.game.active}
         best = max(ranks.values())
         winners = [p for p in self.game.active if ranks[p.id] == best]
         payout = self.game.pot // len(winners)
@@ -519,17 +512,14 @@ class PokerView(View):
         # Pay winners
         for w in winners:
             get_user(w.id)["balance"] += payout
-
         save_data()
 
         # Show results + profit
         desc = f"🃏 Board: {' '.join(self.game.board)}\n\n"
-
         for p in self.game.players:
             spent = self.game.contributions[p.id]
             earned = payout if p in winners else 0
             profit = earned - spent
-
             sign = "+" if profit >= 0 else ""
             desc += (
                 f"{p.mention}: {' '.join(self.game.hands[p.id])}\n"
@@ -545,16 +535,15 @@ class PokerView(View):
         )
         self.stop()
 
-
     @discord.ui.button(label="Check / Call", style=discord.ButtonStyle.green)
-    async def call(self, interaction, _):
+    async def call(self, interaction: discord.Interaction, _):
         if interaction.user != self.current():
             return await interaction.response.send_message("Not your turn.", ephemeral=True)
         await interaction.response.defer()
         await self.next_turn()
 
     @discord.ui.button(label="Raise", style=discord.ButtonStyle.blurple)
-    async def raise_bet(self, interaction, _):
+    async def raise_bet(self, interaction: discord.Interaction, _):
         if interaction.user != self.current():
             return await interaction.response.send_message("Not your turn.", ephemeral=True)
 
@@ -565,13 +554,13 @@ class PokerView(View):
         u["balance"] -= self.game.buyin
         self.game.pot += self.game.buyin
         self.game.contributions[interaction.user.id] += self.game.buyin
-
         save_data()
+
         await interaction.response.defer()
         await self.next_turn()
 
     @discord.ui.button(label="Fold", style=discord.ButtonStyle.red)
-    async def fold(self, interaction, _):
+    async def fold(self, interaction: discord.Interaction, _):
         if interaction.user != self.current():
             return await interaction.response.send_message("Not your turn.", ephemeral=True)
 
@@ -805,7 +794,7 @@ async def poker(interaction: discord.Interaction, amount: int,
                 user3: discord.User | None = None):
 
     players = [interaction.user] + [u for u in (user1, user2, user3) if u]
-    players = list(dict.fromkeys(players))
+    players = list(dict.fromkeys(players))  # remove duplicates
 
     if not 2 <= len(players) <= 5:
         return await interaction.response.send_message("2–5 players required.", ephemeral=True)
@@ -819,22 +808,25 @@ async def poker(interaction: discord.Interaction, amount: int,
     save_data()
 
     game = PokerGame(players, amount)
+    view = PokerView(game, interaction.channel)
 
-    # 🔒 Send hands via DM
+    # ✅ Defer interaction so Discord doesn't 404
+    await interaction.response.defer()
+
+    # 🔒 DM hands to each player
     for p in players:
-        await p.send(
-            embed=discord.Embed(
+        try:
+            await p.send(embed=discord.Embed(
                 title="🂡 Your Poker Hand",
                 description=" ".join(game.hands[p.id]),
                 color=discord.Color.blurple()
-            )
-        )
+            ))
+        except discord.Forbidden:
+            # Cannot DM user
+            await interaction.followup.send(f"⚠️ Could not DM {p.mention}. They might have DMs off.", ephemeral=True)
 
-    view = PokerView(game, interaction.channel)
-    await interaction.response.send_message(embed=view.embed(), view=view)
-
-
-
+    # ✅ Send main game message as followup
+    await interaction.followup.send(embed=view.embed(), view=view)
 
 
 # ==========================================
@@ -848,6 +840,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
