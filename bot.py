@@ -869,6 +869,36 @@ async def poker(interaction: discord.Interaction, amount: int,
     )
 
 
+@bot.tree.command(name="give", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Amount of dabloons to give", user="User to receive dabloons")
+async def give(interaction: discord.Interaction, amount: int, user: discord.User):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Only admins can use this command.", ephemeral=True)
+    
+    if amount <= 0:
+        return await interaction.response.send_message("❌ Amount must be positive.", ephemeral=True)
+
+    u = get_user(user.id)
+    u["balance"] += amount
+    save_data()
+    await interaction.response.send_message(f"✅ Gave **{amount} dabloons** to {user.mention}.")
+
+@bot.tree.command(name="take", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Amount of dabloons to take", user="User to remove dabloons from")
+async def take(interaction: discord.Interaction, amount: int, user: discord.User):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Only admins can use this command.", ephemeral=True)
+    
+    if amount <= 0:
+        return await interaction.response.send_message("❌ Amount must be positive.", ephemeral=True)
+
+    u = get_user(user.id)
+    u["balance"] = max(u["balance"] - amount, 0)
+    save_data()
+    await interaction.response.send_message(f"✅ Took **{amount} dabloons** from {user.mention}.")
+
+
+
 # ==========================================
 # ---------- BOT READY & STARTUP -----------
 # ==========================================
@@ -880,6 +910,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
