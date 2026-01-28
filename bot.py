@@ -559,6 +559,73 @@ class PokerView(View):
 
 
 
+
+
+class PokerRequestView(View):
+    def __init__(self, challenger, opponents, buyin):
+        super().__init__(timeout=120)
+        self.challenger = challenger
+        self.opponents = {u.id: u for u in opponents}
+        self.buyin = buyin
+        self.accepted = {challenger.id}  # challenger auto-accepts
+        self.done = False
+
+    async def try_start(self, interaction):
+        # Start game if all accepted
+        if set(self.accepted) == set(self.opponents.keys()) | {self.challenger.id}:
+            self.done = True
+            # Deduct buy-ins
+            all_players = [self.challenger] + list(self.opponents.values())
+            for p in all_players:
+                get_user(p.id)["balance"] -= self.buyin
+            save_data()
+
+            # Initialize game
+            game = PokerGame(all_players, self.buyin)
+            view = PokerView(game, interaction.channel)
+
+            # DM hands
+            for p in all_players:
+                try:
+                    await p.send(embed=discord.Embed(
+                        title="🂡 Your Poker Hand",
+                        description=" ".join(game.hands[p.id]),
+                        color=discord.Color.blurple()
+                    ))
+                except discord.Forbidden:
+                    # Refund everyone if DM fails
+                    for r in all_players:
+                        get_user(r.id)["balance"] += self.buyin
+                    save_data()
+                    await interaction.channel.send(f"⚠️ Could not DM {p.mention}. Game cancelled.")
+                    self.stop()
+                    return
+
+            # Send main game message
+            await interaction.channel.send(embed=view.embed(), view=view)
+            self.stop()
+
+    @discord.ui.button(label="Accept Poker", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id not in self.opponents:
+            return await interaction.response.send_message("You're not invited to this game.", ephemeral=True)
+        if interaction.user.id in self.accepted:
+            return await interaction.response.send_message("You already accepted.", ephemeral=True)
+
+        self.accepted.add(interaction.user.id)
+        await interaction.response.send_message("✅ You accepted the poker game!", ephemeral=True)
+        await self.try_start(interaction)
+
+    @discord.ui.button(label="Decline Poker", style=discord.ButtonStyle.red)
+    async def decline(self, interaction: discord.Interaction, button: Button):
+        if interaction.user.id not in self.opponents:
+            return await interaction.response.send_message("You're not invited to this game.", ephemeral=True)
+        self.done = True
+        await interaction.channel.send(f"❌ {interaction.user.mention} declined the poker game. Game cancelled.")
+        self.stop()
+
+
+
 # ==========================================
 # ---------- BOT INITIALIZATION ------------
 # ==========================================
@@ -782,42 +849,24 @@ async def poker(interaction: discord.Interaction, amount: int,
                 user2: discord.User | None = None,
                 user3: discord.User | None = None):
 
-    players = [interaction.user] + [u for u in (user1, user2, user3) if u]
-    players = list(dict.fromkeys(players))  # remove duplicates
+    players = [u for u in (user1, user2, user3) if u]
+    if not 1 <= len(players) <= 3:
+        return await interaction.response.send_message("You must invite 1–3 opponents.", ephemeral=True)
 
-    if not 2 <= len(players) <= 5:
-        return await interaction.response.send_message("2–5 players required.", ephemeral=True)
+    all_players = [interaction.user] + players
 
-    # Check balances
-    for p in players:
+    # Check balances before sending request
+    for p in all_players:
         if get_user(p.id)["balance"] < amount:
             return await interaction.response.send_message(f"{p.mention} lacks balance.", ephemeral=True)
 
-    # Deduct buy-ins upfront
-    for p in players:
-        get_user(p.id)["balance"] -= amount
-    save_data()
-
-    game = PokerGame(players, amount)
-    view = PokerView(game, interaction.channel)
-
-    # ✅ Send each player's hand via DM
-    for p in players:
-        try:
-            await p.send(embed=discord.Embed(
-                title="🂡 Your Poker Hand",
-                description=" ".join(game.hands[p.id]),
-                color=discord.Color.blurple()
-            ))
-        except discord.Forbidden:
-            # Stop game if a player can't be DMed
-            for refund in players:
-                get_user(refund.id)["balance"] += amount
-            save_data()
-            return await interaction.response.send_message(f"⚠️ Could not DM {p.mention}. Game cancelled.", ephemeral=True)
-
-    # ✅ Send main game message
-    await interaction.response.send_message(embed=view.embed(), view=view)
+    view = PokerRequestView(interaction.user, players, amount)
+    await interaction.response.send_message(
+        f"🃏 {interaction.user.mention} has challenged {', '.join(u.mention for u in players)} to a poker game!\n"
+        f"💰 Buy-in: **{amount} dabloons** each\n\n"
+        f"All invited players must accept to start the game.",
+        view=view
+    )
 
 
 # ==========================================
@@ -831,6 +880,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
