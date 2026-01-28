@@ -148,6 +148,7 @@ class BlackjackGame:
     def fmt(self, hand):
         return ", ".join(f"{c['r']}{c['s']}" for c in hand)
 
+
 class BlackjackView(View):
     def __init__(self, game, user):
         super().__init__(timeout=90)
@@ -194,22 +195,21 @@ class BlackjackView(View):
             bet = self.game.bets[i]
 
             if pv > 21:
-    u["blackjack"]["losses"] += 1
-    result += f"❌ Hand {i+1} busted\n"
+                u["blackjack"]["losses"] += 1
+                result += f"❌ Hand {i+1} busted\n"
 
-elif dv > 21 or pv > dv:
-    u["balance"] += bet * 2  # ✅ bet refunded + profit
-    u["blackjack"]["wins"] += 1
-    result += f"✅ Hand {i+1} wins\n"
+            elif dv > 21 or pv > dv:
+                u["balance"] += bet * 2
+                u["blackjack"]["wins"] += 1
+                result += f"✅ Hand {i+1} wins\n"
 
-elif pv < dv:
-    u["blackjack"]["losses"] += 1
-    result += f"❌ Hand {i+1} loses\n"
+            elif pv < dv:
+                u["blackjack"]["losses"] += 1
+                result += f"❌ Hand {i+1} loses\n"
 
-else:
-    u["balance"] += bet  # ✅ push → refund bet
-    result += f"➖ Hand {i+1} push\n"
-
+            else:
+                u["balance"] += bet
+                result += f"➖ Hand {i+1} push\n"
 
         embed.description += "\n" + result
         save_data()
@@ -231,27 +231,38 @@ else:
         await self.advance(interaction)
 
     @discord.ui.button(label="Double", style=discord.ButtonStyle.blurple)
-    async def double(self, interaction: discord.Interaction, button: Button):
+    async def double(self, interaction: discord.Interation, button: Button):
         if interaction.user.id != self.user.id:
             return await interaction.response.send_message("Not your game.", ephemeral=True)
+
         u = get_user(self.user.id)
         bet = self.game.bets[self.game.active_hand]
+
         if u["balance"] < bet:
             return await interaction.response.send_message("Not enough balance to double.", ephemeral=True)
+
+        u["balance"] -= bet
         self.game.double()
+        save_data()
         await self.advance(interaction)
 
     @discord.ui.button(label="Split", style=discord.ButtonStyle.gray)
     async def split(self, interaction: discord.Interaction, button: Button):
         if interaction.user.id != self.user.id:
             return await interaction.response.send_message("Not your game.", ephemeral=True)
+
         if not self.game.can_split():
             return await interaction.response.send_message("You can't split this hand.", ephemeral=True)
+
         u = get_user(self.user.id)
         if u["balance"] < self.game.base_bet:
             return await interaction.response.send_message("Not enough balance to split.", ephemeral=True)
+
+        u["balance"] -= self.game.base_bet
         self.game.split()
+        save_data()
         await interaction.response.edit_message(embed=self.embed(), view=self)
+
 
 # ==========================================
 # ---------- COINFLIP COMPONENTS -----------
@@ -837,6 +848,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
