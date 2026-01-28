@@ -194,19 +194,22 @@ class BlackjackView(View):
             bet = self.game.bets[i]
 
             if pv > 21:
-                u["balance"] -= bet
-                u["blackjack"]["losses"] += 1
-                result += f"❌ Hand {i+1} busted\n"
-            elif dv > 21 or pv > dv:
-                u["balance"] += bet
-                u["blackjack"]["wins"] += 1
-                result += f"✅ Hand {i+1} wins\n"
-            elif pv < dv:
-                u["balance"] -= bet
-                u["blackjack"]["losses"] += 1
-                result += f"❌ Hand {i+1} loses\n"
-            else:
-                result += f"➖ Hand {i+1} push\n"
+    u["blackjack"]["losses"] += 1
+    result += f"❌ Hand {i+1} busted\n"
+
+elif dv > 21 or pv > dv:
+    u["balance"] += bet * 2  # ✅ bet refunded + profit
+    u["blackjack"]["wins"] += 1
+    result += f"✅ Hand {i+1} wins\n"
+
+elif pv < dv:
+    u["blackjack"]["losses"] += 1
+    result += f"❌ Hand {i+1} loses\n"
+
+else:
+    u["balance"] += bet  # ✅ push → refund bet
+    result += f"➖ Hand {i+1} push\n"
+
 
         embed.description += "\n" + result
         save_data()
@@ -581,11 +584,18 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.tree.command(name="bj", guild=discord.Object(id=GUILD_ID))
 async def bj(interaction: discord.Interaction, amount: int):
     u = get_user(interaction.user.id)
+
     if amount <= 0 or amount > u["balance"]:
         return await interaction.response.send_message("Invalid bet.", ephemeral=True)
+
+    # 🔒 TAKE MONEY UPFRONT
+    u["balance"] -= amount
+    save_data()
+
     game = BlackjackGame(amount)
     view = BlackjackView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
+
 
 @bot.tree.command(name="cf", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(amount="Bet", choice="heads or tails", user="Opponent (optional)")
@@ -827,6 +837,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
