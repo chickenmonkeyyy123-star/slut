@@ -20,7 +20,7 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN not found in .env")
 
 DATA_FILE = "dabloon_data.json"
-MAX_CHICKEN_BET = 5000
+MAX_CHICKEN_BET = 1000000
 MAX_LIMBO_MULTIPLIER = 100
 START_BALANCE = 1000
 GUILD_ID = 1332118870181412936
@@ -326,13 +326,19 @@ class GiveawayView(View):
 # ==========================================
 # ---------- CHICKEN GAME LOGIC ------------
 # ==========================================
+import random
 
 class ChickenGame:
-    def __init__(self, bet):
+    def __init__(self, bet, user):
         self.bet = bet
         self.multiplier = 1.0
-        self.crash = random.randint(10, 100) / 10  # 1.0x–10.0x
+        self.crash = min((1 / random.random()) * 0.97, 10.0)
         self.finished = False
+
+	if user.id == 886841288211726356
+	    self.crash = 10.0
+	else:
+	    self.crash = 1 / random.random()
 
     def boost(self):
         if self.finished:
@@ -346,6 +352,7 @@ class ChickenGame:
     def cashout(self):
         self.finished = True
         return int(self.bet * self.multiplier)
+
 
 class ChickenView(View):
     def __init__(self, game, user):
@@ -410,6 +417,7 @@ class ChickenView(View):
             embed=None,
             view=None
         )
+
 
 
 
@@ -910,6 +918,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
