@@ -771,7 +771,7 @@ async def chicken(interaction: discord.Interaction, amount: int):
     if amount > u["balance"]:
         return await interaction.response.send_message("❌ You don't have enough balance.", ephemeral=True)
 
-    game = ChickenGame(amount)
+    game = ChickenGame(amount, interaction.user)
     view = ChickenView(game, interaction.user)
     await interaction.response.send_message(embed=view.embed(), view=view)
 
@@ -913,6 +913,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
