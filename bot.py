@@ -20,7 +20,6 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN not found in .env")
 
 DATA_FILE = "dabloon_data.json"
-MAX_CHICKEN_BET = 1000000
 MAX_LIMBO_MULTIPLIER = 100
 START_BALANCE = 1000
 GUILD_ID = 1332118870181412936
@@ -770,9 +769,6 @@ async def chicken(interaction: discord.Interaction, amount: int):
     if amount <= 0:
         return await interaction.response.send_message("❌ Invalid bet.", ephemeral=True)
 
-    if amount > MAX_CHICKEN_BET:
-        return await interaction.response.send_message(f"❌ Max Chicken bet is **{MAX_CHICKEN_BET} dabloons**.", ephemeral=True)
-
     if amount > u["balance"]:
         return await interaction.response.send_message("❌ You don't have enough balance.", ephemeral=True)
 
@@ -918,6 +914,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
