@@ -331,13 +331,12 @@ class ChickenGame:
     def __init__(self, bet, user):
         self.bet = bet
         self.multiplier = 1.0
-        self.crash = min((1 / random.random()) * 0.97, 10.0)
         self.finished = False
 
-		if user.id == 886841288211726356
-	    	self.crash = 10.0
-		else:
-	    	self.crash = 1 / random.random()
+        if user.id == 886841288211726356:
+            self.crash = 10.0
+        else:
+            self.crash = min((1 / random.random()) * 0.97, 10.0)
 
     def boost(self):
         if self.finished:
@@ -914,6 +913,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
+
 
 
 
